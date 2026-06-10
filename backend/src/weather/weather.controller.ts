@@ -36,6 +36,10 @@ export class WeatherController {
     description?: string;
     startTime: string;
     endTime: string;
+    deliveryRangeShrink?: number;
+    etaAddMinutes?: number;
+    shiftAdjustment?: string;
+    shiftDelayMinutes?: number;
   }) {
     return this.weatherService.create(body);
   }
@@ -49,6 +53,10 @@ export class WeatherController {
       description?: string;
       startTime?: string;
       endTime?: string;
+      deliveryRangeShrink?: number;
+      etaAddMinutes?: number;
+      shiftAdjustment?: string;
+      shiftDelayMinutes?: number;
     },
   ) {
     return this.weatherService.update(id, body);
@@ -57,5 +65,10 @@ export class WeatherController {
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.weatherService.remove(id);
+  }
+
+  @Post(':id/apply')
+  applyCapacityAdjustment(@Param('id', ParseIntPipe) id: number) {
+    return this.weatherService.applyCapacityAdjustment(id);
   }
 }

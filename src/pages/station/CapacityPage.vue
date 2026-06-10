@@ -20,7 +20,22 @@
       <h2 class="text-lg font-semibold text-text mb-4">最近订单</h2>
       <DataTable :columns="orderColumns" :data="recentOrders" :loading="ordersStore.loading">
         <template #status="{ row }">
-          <StatusBadge :status="row.status" type="order" />
+          <div class="space-y-1">
+            <StatusBadge :status="row.status" type="order" />
+            <div v-if="row.weatherAffected?.length || row.slowPrepareFlag === 1 || row.slowPrepareRecord" class="flex flex-wrap gap-1 mt-1">
+              <StatusBadge
+                v-for="(w, idx) in row.weatherAffected"
+                :key="`weather-${idx}`"
+                :status="formatWeatherLabel(w)"
+                type="weather-affected"
+              />
+              <StatusBadge
+                v-if="row.slowPrepareFlag === 1 || row.slowPrepareRecord"
+                :status="formatSlowPrepareLabel(row)"
+                type="slow-prepare"
+              />
+            </div>
+          </div>
         </template>
       </DataTable>
     </div>
@@ -59,6 +74,16 @@ const orderColumns = [
   { key: 'status', label: '状态' },
   { key: 'createdAt', label: '创建时间', sortable: true },
 ]
+
+function formatWeatherLabel(w: any) {
+  const text = w.text || `${w.type}${w.level}`
+  return `${text}+${w.delayMinutes}min`
+}
+
+function formatSlowPrepareLabel(order: any) {
+  const waiting = order.slowPrepareRecord?.waitingMinutes ?? 12
+  return `出餐慢 ${waiting}min`
+}
 
 onMounted(() => {
   stationStore.fetchCapacity(auth.user?.stationId)

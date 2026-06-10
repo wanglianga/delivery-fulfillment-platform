@@ -1,9 +1,54 @@
 <template>
   <div class="space-y-6">
+    <div v-if="hasOrderAffectors" class="card border-l-4 border-accent">
+      <h3 class="font-semibold text-text mb-3 flex items-center gap-2">
+        <AlertTriangle class="w-4 h-4 text-accent" /> 订单影响因素
+      </h3>
+      <div class="flex flex-wrap gap-2">
+        <span
+          v-for="(w, idx) in order?.weatherAffected || []"
+          :key="'w-' + idx"
+          class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium"
+          :class="weatherLevelClass(w.level)"
+        >
+          {{ w.type }}{{ weatherLevelLabel(w.level) }}
+          <span v-if="w.detail" class="ml-1 opacity-90">({{ formatWeatherDetail(w.detail) }})</span>
+        </span>
+        <span
+          v-if="order?.slowPrepareFlag === 1"
+          class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700"
+        >
+          <Clock class="w-3 h-3 mr-1" /> 出餐慢
+          <span class="ml-1">(等待{{ Math.floor((order?.slowPrepareWaitSeconds || 0) / 60) }}分钟)</span>
+        </span>
+      </div>
+    </div>
+
     <div class="card">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold text-text">配送详情</h2>
         <StatusBadge :status="order?.status || ''" type="order" />
+      </div>
+
+      <div v-if="isArrivedStore" class="mb-4 p-3 rounded-lg bg-gray-50 border border-border">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <Clock class="w-4 h-4 text-text-light" />
+            <span class="text-sm text-text-light">到店等待时间：</span>
+            <span
+              class="font-mono text-lg font-semibold"
+              :class="{
+                'text-danger animate-pulse': waitSecondsExceeded,
+                'text-text': !waitSecondsExceeded,
+              }"
+            >
+              {{ formatWaitTime(waitSeconds) }}
+            </span>
+          </div>
+          <span class="text-xs text-text-muted">
+            阈值：{{ Math.floor(WAIT_THRESHOLD / 60) }}分钟
+          </span>
+        </div>
       </div>
 
       <StepProgress
@@ -33,12 +78,33 @@
           <span class="text-text-light">金额:</span>
           <span class="ml-2 font-medium">¥{{ order?.totalAmount ?? '-' }}</span>
         </div>
-        <div>
-          <span class="text-text-light">送达照片:</span>
-          <span class="ml-2">
-            <img v-if="order?.deliveryPhoto" :src="order.deliveryPhoto" class="inline w-16 h-16 object-cover rounded" />
-            <span v-else class="text-text-muted">未上传</span>
-          </span>
+        <div class="col-span-2">
+          <span class="text-text-light">照片凭证:</span>
+          <div class="ml-2 mt-1 inline-flex gap-3 align-top">
+            <div class="text-center">
+              <img v-if="order?.pickupPhoto" :src="order.pickupPhoto" class="w-16 h-16 object-cover rounded border border-border" />
+              <div v-else class="w-16 h-16 rounded border border-dashed border-border flex items-center justify-center text-text-muted text-xs">
+                未上传
+              </div>
+              <div class="text-xs text-text-muted mt-1">取货照片</div>
+            </div>
+            <div class="text-center">
+              <img v-if="order?.deliveryPhoto" :src="order.deliveryPhoto" class="w-16 h-16 object-cover rounded border border-border" />
+              <div v-else class="w-16 h-16 rounded border border-dashed border-border flex items-center justify-center text-text-muted text-xs">
+                未上传
+              </div>
+              <div class="text-xs text-text-muted mt-1">送达照片</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="waitSecondsExceeded && isArrivedStore" class="card border-l-4 border-danger bg-red-50/30">
+      <div class="flex items-start gap-3">
+        <AlertTriangle class="w-5 h-5 text-danger shrink-0 mt-0.5" />
+        <div class="text-sm text-danger font-medium">
+          ⚠️ 出餐已超过{{ Math.floor(WAIT_THRESHOLD / 60) }}分钟，系统已记录，请上传取货照片作为凭证，超时责任将计入商户履约评分
         </div>
       </div>
     </div>
@@ -55,13 +121,37 @@
           <MapPin class="w-4 h-4 mr-1 inline" /> 到店打卡
         </button>
         <button
-          v-if="canAction('pick_up')"
-          class="btn-primary"
+          v-if="canAction('merchant_confirm')"
+          class="btn-secondary"
           :disabled="acting"
-          @click="doAction('pick-up', '取货确认')"
+          @click="doAction('merchant-confirm', '商户确认出餐')"
         >
-          <Package class="w-4 h-4 mr-1 inline" /> 取货确认
+          <UtensilsCrossed class="w-4 h-4 mr-1 inline" /> 商户确认出餐
         </button>
+        <template v-if="canAction('pick_up')">
+          <button
+            class="btn-primary"
+            :disabled="acting"
+            @click="doPickUp"
+          >
+            <Package class="w-4 h-4 mr-1 inline" /> 取货确认
+          </button>
+          <button
+            class="btn-secondary"
+            :disabled="acting"
+            @click="triggerPickupPhotoUpload"
+          >
+            <Camera class="w-4 h-4 mr-1 inline" />
+            {{ order?.pickupPhoto ? '重新上传取货照片' : '上传取货照片' }}
+          </button>
+          <input
+            ref="pickupPhotoInput"
+            type="file"
+            accept="image/*"
+            class="hidden"
+            @change="uploadPickupPhoto"
+          />
+        </template>
         <button
           v-if="canAction('deliver')"
           class="btn-primary"
@@ -74,16 +164,16 @@
           v-if="canAction('deliver_photo')"
           class="btn-primary"
           :disabled="acting"
-          @click="triggerPhotoUpload"
+          @click="triggerDeliveryPhotoUpload"
         >
           <Camera class="w-4 h-4 mr-1 inline" /> 上传送达照片
         </button>
         <input
-          ref="photoInput"
+          ref="deliveryPhotoInput"
           type="file"
           accept="image/*"
           class="hidden"
-          @change="uploadPhoto"
+          @change="uploadDeliveryPhoto"
         />
         <button
           v-if="canAction('sign')"
@@ -113,6 +203,40 @@
         </div>
       </div>
       <div v-else class="text-text-muted text-sm">暂无记录</div>
+    </div>
+
+    <div v-if="order?.slowPrepareRecord" class="card">
+      <h3 class="font-semibold text-text mb-3 flex items-center gap-2">
+        <Clock class="w-4 h-4 text-danger" /> 出餐慢记录
+      </h3>
+      <div class="grid grid-cols-2 gap-4 text-sm">
+        <div>
+          <span class="text-text-light">到店时间:</span>
+          <span class="ml-2 font-medium">{{ formatTime(order.slowPrepareRecord.arrivedStoreAt) }}</span>
+        </div>
+        <div>
+          <span class="text-text-light">商户确认时间:</span>
+          <span class="ml-2 font-medium">{{ formatTime(order.slowPrepareRecord.merchantConfirmedAt) || '-' }}</span>
+        </div>
+        <div>
+          <span class="text-text-light">取货时间:</span>
+          <span class="ml-2 font-medium">{{ formatTime(order.slowPrepareRecord.pickedUpAt) || '-' }}</span>
+        </div>
+        <div>
+          <span class="text-text-light">等待时长:</span>
+          <span class="ml-2 font-medium text-danger">
+            {{ Math.floor((order.slowPrepareRecord.waitSeconds || 0) / 60) }}分
+            {{ (order.slowPrepareRecord.waitSeconds || 0) % 60 }}秒
+          </span>
+        </div>
+        <div class="col-span-2">
+          <span class="text-text-light">取货凭证照片:</span>
+          <div class="ml-2 mt-1">
+            <img v-if="order.slowPrepareRecord.pickupPhoto" :src="order.slowPrepareRecord.pickupPhoto" class="w-20 h-20 object-cover rounded border border-border" />
+            <span v-else class="text-text-muted">未上传</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -151,22 +275,27 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api'
 import StatusBadge from '@/components/StatusBadge.vue'
 import StepProgress from '@/components/StepProgress.vue'
 import Modal from '@/components/Modal.vue'
-import { MapPin, Package, Truck, Camera, CheckCircle, AlertTriangle } from 'lucide-vue-next'
+import { MapPin, Package, Truck, Camera, CheckCircle, AlertTriangle, Clock, UtensilsCrossed } from 'lucide-vue-next'
 
 const route = useRoute()
 const orderId = computed(() => Number(route.params.id))
 
+const WAIT_THRESHOLD = 600
+
 const order = ref<any>(null)
 const acting = ref(false)
-const photoInput = ref<HTMLInputElement | null>(null)
+const deliveryPhotoInput = ref<HTMLInputElement | null>(null)
+const pickupPhotoInput = ref<HTMLInputElement | null>(null)
 const showExceptionModal = ref(false)
 const submitting = ref(false)
+const waitSeconds = ref(0)
+let waitTimer: ReturnType<typeof setInterval> | null = null
 
 const deliverySteps = ['接单', '到店', '取货', '配送', '送达', '签收']
 
@@ -184,21 +313,90 @@ const currentStepIndex = computed(() => stepIndexMap[order.value?.status || ''] 
 
 const actionVisibility: Record<string, string[]> = {
   arrive_store: ['accepted'],
+  merchant_confirm: ['arrived_store'],
   pick_up: ['arrived_store'],
   deliver: ['picked_up'],
   deliver_photo: ['delivering'],
   sign: ['delivered'],
 }
 
+const isArrivedStore = computed(() => order.value?.status === 'arrived_store')
+
+const waitSecondsExceeded = computed(() => waitSeconds.value > WAIT_THRESHOLD)
+
+const hasOrderAffectors = computed(() => {
+  return (order.value?.weatherAffected?.length > 0) || (order.value?.slowPrepareFlag === 1)
+})
+
 function canAction(action: string) {
   const allowedStatuses = actionVisibility[action] || []
   return allowedStatuses.includes(order.value?.status || '')
 }
 
+function weatherLevelClass(level: string) {
+  if (level === 'red') return 'bg-red-100 text-red-700'
+  if (level === 'orange') return 'bg-orange-100 text-orange-700'
+  return 'bg-yellow-100 text-yellow-700'
+}
+
+function weatherLevelLabel(level: string) {
+  if (level === 'red') return '红色'
+  if (level === 'orange') return '橙色'
+  return '黄色'
+}
+
+function formatWeatherDetail(detail: string) {
+  if (detail.startsWith('+') && detail.endsWith('min')) {
+    const mins = detail.slice(1, -3)
+    return `延长${mins}分钟`
+  }
+  return detail
+}
+
+function formatWaitTime(seconds: number) {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+}
+
+function startWaitTimer() {
+  stopWaitTimer()
+  updateWaitSeconds()
+  waitTimer = setInterval(updateWaitSeconds, 1000)
+}
+
+function stopWaitTimer() {
+  if (waitTimer) {
+    clearInterval(waitTimer)
+    waitTimer = null
+  }
+}
+
+function updateWaitSeconds() {
+  if (!order.value?.arrivedStoreAt) {
+    waitSeconds.value = 0
+    return
+  }
+  const arrived = new Date(order.value.arrivedStoreAt).getTime()
+  waitSeconds.value = Math.floor((Date.now() - arrived) / 1000)
+}
+
+watch(isArrivedStore, (val) => {
+  if (val) {
+    startWaitTimer()
+  } else {
+    stopWaitTimer()
+    waitSeconds.value = 0
+  }
+})
+
 async function fetchOrder() {
   try {
     const res = await api.get(`/orders/${orderId.value}`)
     order.value = res.data
+    if (isArrivedStore.value) {
+      startWaitTimer()
+    }
   } catch {
     order.value = null
   }
@@ -216,11 +414,31 @@ async function doAction(action: string, _label: string) {
   }
 }
 
-function triggerPhotoUpload() {
-  photoInput.value?.click()
+async function doPickUp() {
+  acting.value = true
+  try {
+    const body: { pickupPhoto?: string } = {}
+    if (order.value?.pickupPhoto) {
+      body.pickupPhoto = order.value.pickupPhoto
+    }
+    await api.post(`/orders/${orderId.value}/pick-up`, body)
+    await fetchOrder()
+  } catch (e) {
+    console.error('操作失败', e)
+  } finally {
+    acting.value = false
+  }
 }
 
-async function uploadPhoto(event: Event) {
+function triggerDeliveryPhotoUpload() {
+  deliveryPhotoInput.value?.click()
+}
+
+function triggerPickupPhotoUpload() {
+  pickupPhotoInput.value?.click()
+}
+
+async function uploadDeliveryPhoto(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.files?.length) return
   acting.value = true
@@ -228,6 +446,25 @@ async function uploadPhoto(event: Event) {
     const formData = new FormData()
     formData.append('photo', input.files[0])
     await api.post(`/orders/${orderId.value}/deliver-photo`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    await fetchOrder()
+  } catch (e) {
+    console.error('上传失败', e)
+  } finally {
+    acting.value = false
+    input.value = ''
+  }
+}
+
+async function uploadPickupPhoto(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (!input.files?.length) return
+  acting.value = true
+  try {
+    const formData = new FormData()
+    formData.append('photo', input.files[0])
+    await api.post(`/orders/${orderId.value}/upload-pickup-photo`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
     await fetchOrder()
@@ -269,4 +506,7 @@ async function submitException() {
 }
 
 onMounted(fetchOrder)
+onUnmounted(() => {
+  stopWaitTimer()
+})
 </script>

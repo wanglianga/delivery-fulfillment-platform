@@ -12,6 +12,29 @@
           <span class="text-sm text-text-muted">{{ formatTime(order.createdAt) }}</span>
         </div>
 
+        <div v-if="order.weatherAffected?.length || order.slowPrepareFlag === 1 || order.slowPrepareRecord" class="mb-3">
+          <div class="flex flex-wrap gap-1 mb-2">
+            <StatusBadge
+              v-for="(w, idx) in order.weatherAffected"
+              :key="`weather-${idx}`"
+              :status="formatWeatherLabel(w)"
+              type="weather-affected"
+            />
+            <StatusBadge
+              v-if="order.slowPrepareFlag === 1 || order.slowPrepareRecord"
+              :status="formatSlowPrepareLabel(order)"
+              type="slow-prepare"
+            />
+          </div>
+          <div v-if="order.slowPrepareFlag === 1 || order.slowPrepareRecord" class="text-xs text-red-600 bg-red-50 rounded px-2 py-1.5">
+            <span>等待时长：{{ order.slowPrepareRecord?.waitingMinutes ?? 12 }} 分钟</span>
+            <span v-if="order.slowPrepareRecord?.scoreImpact" class="ml-2">
+              · 影响商户分数：-{{ order.slowPrepareRecord.scoreImpact }} 分
+            </span>
+            <span class="ml-2">· 请尽快出餐，避免继续扣分</span>
+          </div>
+        </div>
+
         <div class="space-y-1 text-sm mb-3">
           <div class="flex items-center gap-2">
             <User class="w-4 h-4 text-text-muted" />
@@ -96,6 +119,16 @@ async function prepareOrder(id: number) {
 async function readyOrder(id: number) {
   await ordersStore.merchantReady(id)
   await fetchOrders()
+}
+
+function formatWeatherLabel(w: any) {
+  const text = w.text || `${w.type}${w.level}`
+  return `${text}+${w.delayMinutes}min`
+}
+
+function formatSlowPrepareLabel(order: any) {
+  const waiting = order.slowPrepareRecord?.waitingMinutes ?? 12
+  return `出餐慢 ${waiting}min`
 }
 
 onMounted(fetchOrders)

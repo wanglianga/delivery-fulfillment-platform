@@ -2,12 +2,27 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/api'
 
+export interface WeatherAffectedItem {
+  type: string
+  level: string
+  delayMinutes: number
+  text?: string
+}
+
+export interface SlowPrepareRecord {
+  flaggedAt: string
+  waitingMinutes: number
+  scoreImpact?: number
+  note?: string
+}
+
 export interface Order {
   id: number
   orderNo: string
   status: string
   stationId: number
   merchantId: number
+  merchantName?: string
   riderId?: number
   riderName?: string
   customerName: string
@@ -17,6 +32,9 @@ export interface Order {
   totalAmount?: number
   deliveryFee?: number
   estimatedDeliveryTime?: string
+  weatherAffected?: WeatherAffectedItem[]
+  slowPrepareFlag?: number
+  slowPrepareRecord?: SlowPrepareRecord
   createdAt: string
   updatedAt: string
 }

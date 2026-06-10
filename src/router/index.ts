@@ -59,6 +59,12 @@ const routes: RouteRecordRaw[] = [
         meta: { roles: ['station'] },
       },
       {
+        path: 'station/merchant-performance',
+        name: 'station-merchant-performance',
+        component: () => import('@/pages/station/MerchantPerformancePage.vue'),
+        meta: { roles: ['station'] },
+      },
+      {
         path: 'heatmap',
         name: 'heatmap',
         component: () => import('@/pages/HeatmapPage.vue'),
@@ -98,6 +104,12 @@ const routes: RouteRecordRaw[] = [
         path: 'merchant/exceptions',
         name: 'merchant-exceptions',
         component: () => import('@/pages/merchant/MerchantExceptionPage.vue'),
+        meta: { roles: ['merchant'] },
+      },
+      {
+        path: 'merchant/slow-prepare',
+        name: 'merchant-slow-prepare',
+        component: () => import('@/pages/merchant/SlowPreparePage.vue'),
         meta: { roles: ['merchant'] },
       },
       {

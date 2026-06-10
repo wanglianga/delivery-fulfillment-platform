@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils'
 
 const props = defineProps<{
   status: string
-  type?: 'order' | 'shift' | 'ticket' | 'compensation'
+  type?: 'order' | 'shift' | 'ticket' | 'compensation' | 'weather-affected' | 'slow-prepare'
 }>()
 
 const orderStatusMap: Record<string, { label: string; color: string }> = {
@@ -55,6 +55,22 @@ const compensationStatusMap: Record<string, { label: string; color: string }> = 
   paid: { label: '已支付', color: 'bg-green-100 text-green-700' },
 }
 
+const weatherLevelColors: Record<string, string> = {
+  blue: 'bg-blue-100 text-blue-800',
+  yellow: 'bg-yellow-100 text-yellow-800',
+  orange: 'bg-orange-100 text-orange-800',
+  red: 'bg-red-100 text-red-800',
+  gray: 'bg-gray-100 text-gray-600',
+}
+
+function getWeatherColor(text: string): string {
+  if (text.includes('红')) return weatherLevelColors.red
+  if (text.includes('橙')) return weatherLevelColors.orange
+  if (text.includes('黄')) return weatherLevelColors.yellow
+  if (text.includes('蓝')) return weatherLevelColors.blue
+  return weatherLevelColors.gray
+}
+
 const maps: Record<string, Record<string, { label: string; color: string }>> = {
   order: orderStatusMap,
   shift: shiftStatusMap,
@@ -63,6 +79,12 @@ const maps: Record<string, Record<string, { label: string; color: string }>> = {
 }
 
 const statusInfo = computed(() => {
+  if (props.type === 'slow-prepare') {
+    return { label: props.status, color: 'bg-red-100 text-red-800 border border-red-200' }
+  }
+  if (props.type === 'weather-affected') {
+    return { label: props.status, color: getWeatherColor(props.status) }
+  }
   const map = maps[props.type || 'order'] || orderStatusMap
   return map[props.status] || { label: props.status, color: 'bg-gray-100 text-gray-600' }
 })

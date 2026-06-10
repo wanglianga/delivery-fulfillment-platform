@@ -61,11 +61,95 @@ export class TicketsService {
   }
 
   judge(id: number, responsibility: string, resolution: string) {
+    const ticket = this.findOne(id);
+    if (!ticket) return null;
+
+    let finalResolution = resolution;
+
+    if (responsibility === 'platform') {
+      const order = this.db.get('SELECT * FROM orders WHERE id = ?', [ticket.orderId]);
+      const activeAlerts = this.db.all(
+        `SELECT type, level, description, eta_add_minutes 
+         FROM weather_alert 
+         WHERE station_id = ? AND datetime(end_time) > datetime('now') 
+           AND datetime(start_time) <= datetime('now')`,
+        [order?.station_id],
+      );
+      const hasSevereWeather = activeAlerts.some(
+        (a: any) => a.level === 'red' || a.level === 'orange' || a.eta_add_minutes >= 15,
+      );
+      const excludeRider = hasSevereWeather;
+
+      if (excludeRider) {
+        const contextParts: string[] = [];
+
+        if (order?.weather_affected) {
+          const weatherInfo = order.weather_affected;
+          const parts = weatherInfo.split(':');
+          const type = parts[1] || '天气';
+          const level = parts[2] || '';
+          const detail = parts[3] || '';
+          contextParts.push(`受${level ? level + '级' : ''}${type}影响${detail ? '(' + detail + ')' : ''}`);
+        }
+
+        if (order?.slow_prepare_flag === 1) {
+          const waitMin = Math.floor((order.slow_prepare_wait_seconds || 0) / 60);
+          contextParts.push(`商户出餐慢（等待约${waitMin}分钟）`);
+        }
+
+        if (contextParts.length > 0) {
+          finalResolution = `${resolution || ''} | 上下文说明：${contextParts.join('；')}，骑手免责`;
+        }
+      }
+    }
+
     this.db.run(
       `UPDATE ticket SET responsibility = ?, resolution = ?, status = 'judged', judged_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
-      [responsibility, resolution, id],
+      [responsibility, finalResolution, id],
     );
     return this.findOne(id);
+  }
+
+  private calculateCompensation(ruleType: string, value: number, totalAmount: number, minAmount: number, maxAmount: number): number {
+    let amount = 0;
+
+    switch (ruleType) {
+      case 'percent':
+        amount = totalAmount * value;
+        break;
+      case 'fixed':
+        amount = value;
+        break;
+      case 'hybrid':
+        amount = totalAmount * value;
+        if (minAmount > 0 && amount < minAmount) {
+          amount = minAmount;
+        }
+        if (maxAmount > 0 && amount > maxAmount) {
+          amount = maxAmount;
+        }
+        break;
+      default:
+        amount = totalAmount * 0.2;
+    }
+
+    if (ruleType !== 'hybrid') {
+      if (minAmount > 0 && amount < minAmount) {
+        amount = minAmount;
+      }
+      if (maxAmount > 0 && amount > maxAmount) {
+        amount = maxAmount;
+      }
+    }
+
+    return Math.round(amount * 100) / 100;
+  }
+
+  private getCompensationRule(responsibility: string): any {
+    return this.db.get(
+      'SELECT * FROM customer_compensation_rule WHERE responsibility = ?',
+      [responsibility],
+    );
   }
 
   compensate(id: number, userId: number) {
@@ -78,65 +162,124 @@ export class TicketsService {
     );
 
     const order = this.db.get('SELECT * FROM orders WHERE id = ?', [ticket.orderId]);
-    let recipientType: string;
-    let recipientId: number;
-    let recipientName: string;
-    let compType: string;
-    let amount: number;
+    const totalAmount = order?.total_amount || 0;
+    const rider = order?.rider_id ? this.db.get('SELECT name FROM user WHERE id = ?', [order.rider_id]) : null;
+    const customerName = order?.customer_name || '顾客';
+    const riderName = rider?.name || '骑手';
+    const riderId = order?.rider_id || 0;
+
+    const compensationsToCreate: Array<{
+      type: string;
+      amount: number;
+      recipientType: string;
+      recipientId: number;
+      recipientName: string;
+      reason: string;
+    }> = [];
 
     switch (ticket.responsibility) {
-      case 'platform':
-        recipientType = 'customer';
-        compType = 'refund_customer';
-        amount = (order?.total_amount || 0) * 0.3;
-        recipientId = 0;
-        recipientName = order?.customer_name || '顾客';
+      case 'platform': {
+        const rule = this.getCompensationRule('platform');
+        const amount = rule
+          ? this.calculateCompensation(rule.rule_type, rule.value, totalAmount, rule.min_amount, rule.max_amount)
+          : totalAmount * 0.3;
+        compensationsToCreate.push({
+          type: 'refund_customer',
+          amount,
+          recipientType: 'customer',
+          recipientId: 0,
+          recipientName: customerName,
+          reason: `基于工单${ticket.id}责任判定(platform)自动生成${rule ? `，规则：${rule.rule_type}(${rule.value})` : ''}`,
+        });
         break;
-      case 'merchant':
-        recipientType = 'rider';
-        compType = 'compensate_rider';
-        amount = 15;
-        recipientId = order?.rider_id || 0;
-        const rider = this.db.get('SELECT name FROM user WHERE id = ?', [order?.rider_id]);
-        recipientName = rider?.name || '骑手';
+      }
+      case 'merchant': {
+        const riderRule = this.getCompensationRule('rider');
+        const riderAmount = riderRule
+          ? this.calculateCompensation(riderRule.rule_type, riderRule.value, totalAmount, riderRule.min_amount, riderRule.max_amount)
+          : 15;
+        compensationsToCreate.push({
+          type: 'compensate_rider',
+          amount: riderAmount,
+          recipientType: 'rider',
+          recipientId: riderId,
+          recipientName: riderName,
+          reason: `基于工单${ticket.id}责任判定(merchant)自动补偿骑手${riderRule ? `，规则：${riderRule.rule_type}(${riderRule.value})` : ''}`,
+        });
+
+        const customerRule = this.getCompensationRule('merchant');
+        const customerAmount = customerRule
+          ? this.calculateCompensation(customerRule.rule_type, customerRule.value, totalAmount, customerRule.min_amount, customerRule.max_amount)
+          : totalAmount * 0.2;
+        compensationsToCreate.push({
+          type: 'refund_customer',
+          amount: customerAmount,
+          recipientType: 'customer',
+          recipientId: 0,
+          recipientName: customerName,
+          reason: `基于工单${ticket.id}责任判定(merchant)自动补偿顾客${customerRule ? `，规则：${customerRule.rule_type}(${customerRule.value})` : ''}`,
+        });
         break;
-      case 'rider':
-        recipientType = 'customer';
-        compType = 'refund_customer';
-        amount = (order?.total_amount || 0) * 0.5;
-        recipientId = 0;
-        recipientName = order?.customer_name || '顾客';
+      }
+      case 'rider': {
+        const rule = this.getCompensationRule('rider');
+        const amount = rule
+          ? this.calculateCompensation(rule.rule_type, rule.value, totalAmount, rule.min_amount, rule.max_amount)
+          : totalAmount * 0.5;
+        compensationsToCreate.push({
+          type: 'refund_customer',
+          amount,
+          recipientType: 'customer',
+          recipientId: 0,
+          recipientName: customerName,
+          reason: `基于工单${ticket.id}责任判定(rider)自动生成${rule ? `，规则：${rule.rule_type}(${rule.value})` : ''}`,
+        });
         break;
-      case 'customer':
-        recipientType = 'rider';
-        compType = 'compensate_rider';
-        amount = 10;
-        recipientId = order?.rider_id || 0;
-        const rider2 = this.db.get('SELECT name FROM user WHERE id = ?', [order?.rider_id]);
-        recipientName = rider2?.name || '骑手';
+      }
+      case 'customer': {
+        const rule = this.getCompensationRule('customer');
+        const amount = rule
+          ? this.calculateCompensation(rule.rule_type, rule.value, totalAmount, rule.min_amount, rule.max_amount)
+          : 10;
+        compensationsToCreate.push({
+          type: 'compensate_rider',
+          amount,
+          recipientType: 'rider',
+          recipientId: riderId,
+          recipientName: riderName,
+          reason: `基于工单${ticket.id}责任判定(customer)自动生成${rule ? `，规则：${rule.rule_type}(${rule.value})` : ''}`,
+        });
         break;
-      default:
-        recipientType = 'customer';
-        compType = 'refund_customer';
-        amount = (order?.total_amount || 0) * 0.2;
-        recipientId = 0;
-        recipientName = order?.customer_name || '顾客';
+      }
+      default: {
+        const amount = totalAmount * 0.2;
+        compensationsToCreate.push({
+          type: 'refund_customer',
+          amount,
+          recipientType: 'customer',
+          recipientId: 0,
+          recipientName: customerName,
+          reason: `基于工单${ticket.id}责任判定(默认)自动生成`,
+        });
+      }
     }
 
-    this.db.run(
-      `INSERT INTO compensation (ticket_id, order_id, type, amount, recipient_type, recipient_id, recipient_name, reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        ticket.orderId,
-        compType,
-        Math.round(amount * 100) / 100,
-        recipientType,
-        recipientId,
-        recipientName,
-        `基于工单${ticket.id}责任判定(${ticket.responsibility})自动生成`,
-      ],
-    );
+    for (const comp of compensationsToCreate) {
+      this.db.run(
+        `INSERT INTO compensation (ticket_id, order_id, type, amount, recipient_type, recipient_id, recipient_name, reason)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          ticket.orderId,
+          comp.type,
+          comp.amount,
+          comp.recipientType,
+          comp.recipientId,
+          comp.recipientName,
+          comp.reason,
+        ],
+      );
+    }
 
     return this.findOne(id);
   }

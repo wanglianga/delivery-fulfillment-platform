@@ -26,6 +26,19 @@
           <span class="font-mono text-sm text-text-light">{{ order.orderNo }}</span>
           <StatusBadge :status="order.status" type="order" />
         </div>
+        <div v-if="order.weatherAffected?.length || order.slowPrepareFlag === 1" class="flex flex-wrap gap-1 mb-2">
+          <StatusBadge
+            v-for="(w, idx) in order.weatherAffected"
+            :key="`weather-${idx}`"
+            :status="formatWeatherLabel(w)"
+            type="weather-affected"
+          />
+          <StatusBadge
+            v-if="order.slowPrepareFlag === 1"
+            :status="formatSlowPrepareLabel(order)"
+            type="slow-prepare"
+          />
+        </div>
         <div class="text-sm space-y-1">
           <div class="flex items-center gap-2">
             <Store class="w-4 h-4 text-text-muted" />
@@ -147,6 +160,16 @@ function goToDelivery(order: any) {
   if (order.status !== 'pending') {
     router.push(`/rider/delivery/${order.id}`)
   }
+}
+
+function formatWeatherLabel(w: any) {
+  const text = w.text || `${w.type}${w.level}`
+  return `${text}+${w.delayMinutes}min`
+}
+
+function formatSlowPrepareLabel(order: any) {
+  const waiting = order.slowPrepareRecord?.waitingMinutes ?? 12
+  return `出餐慢 ${waiting}min`
 }
 
 onMounted(() => {

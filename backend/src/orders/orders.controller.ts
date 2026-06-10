@@ -47,6 +47,11 @@ export class OrdersController {
     return this.ordersService.findOne(id);
   }
 
+  @Get(':id/context')
+  getContext(@Param('id', ParseIntPipe) id: number) {
+    return this.ordersService.getOrderContext(id);
+  }
+
   @Post()
   create(@Body() body: {
     stationId: number;
@@ -91,12 +96,42 @@ export class OrdersController {
     return this.ordersService.arriveStore(id, user.name);
   }
 
+  @Post(':id/merchant-confirm')
+  merchantConfirm(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
+    return this.ordersService.merchantConfirm(id, user.name);
+  }
+
   @Post(':id/pick-up')
   pickUp(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: any,
+    @Body() body?: { pickupPhoto?: string },
   ) {
-    return this.ordersService.pickUp(id, user.name);
+    return this.ordersService.pickUp(id, user.name, body?.pickupPhoto);
+  }
+
+  @Post(':id/upload-pickup-photo')
+  @UseInterceptors(
+    FileInterceptor('photo', {
+      storage: diskStorage({
+        destination: './uploads',
+        filename: (_req, file, cb) => {
+          const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
+          cb(null, uniqueName);
+        },
+      }),
+    }),
+  )
+  uploadPickupPhoto(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: any,
+  ) {
+    const photoUrl = `/uploads/${file.filename}`;
+    return this.ordersService.uploadPickupPhoto(id, photoUrl, user.name);
   }
 
   @Post(':id/deliver')

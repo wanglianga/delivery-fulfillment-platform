@@ -4,7 +4,29 @@
 
     <DataTable :columns="columns" :data="orders" :loading="loading">
       <template #status="{ row }">
-        <StatusBadge :status="row.status" type="order" />
+        <div class="space-y-1">
+          <StatusBadge :status="row.status" type="order" />
+          <div v-if="row.weatherAffected?.length || row.slowPrepareFlag === 1 || row.slowPrepareRecord" class="flex flex-wrap gap-1 mt-1">
+            <StatusBadge
+              v-for="(w, idx) in row.weatherAffected"
+              :key="`weather-${idx}`"
+              :status="formatWeatherLabel(w)"
+              type="weather-affected"
+            />
+            <StatusBadge
+              v-if="row.slowPrepareFlag === 1 || row.slowPrepareRecord"
+              :status="formatSlowPrepareLabel(row)"
+              type="slow-prepare"
+            />
+          </div>
+        </div>
+      </template>
+      <template #slowAlert="{ row }">
+        <div v-if="row.slowPrepareFlag === 1 || row.slowPrepareRecord" class="text-xs text-red-600">
+          <span>等待 {{ row.slowPrepareRecord?.waitingMinutes ?? 12 }} 分钟</span>
+          <span v-if="row.slowPrepareRecord?.scoreImpact" class="ml-1">(-{{ row.slowPrepareRecord.scoreImpact }}分)</span>
+        </div>
+        <span v-else class="text-text-muted text-xs">-</span>
       </template>
       <template #actions="{ row }">
         <button class="text-info hover:underline text-sm" @click="viewDetail(row)">查看详情</button>
@@ -29,6 +51,29 @@
           <div>
             <span class="text-text-light">金额:</span>
             <span class="ml-2">¥{{ selectedOrder.totalAmount ?? '-' }}</span>
+          </div>
+        </div>
+
+        <div v-if="selectedOrder.weatherAffected?.length || selectedOrder.slowPrepareFlag === 1 || selectedOrder.slowPrepareRecord" class="space-y-2">
+          <h4 class="text-sm font-medium text-text">影响因素</h4>
+          <div class="flex flex-wrap gap-1">
+            <StatusBadge
+              v-for="(w, idx) in selectedOrder.weatherAffected"
+              :key="`weather-${idx}`"
+              :status="formatWeatherLabel(w)"
+              type="weather-affected"
+            />
+            <StatusBadge
+              v-if="selectedOrder.slowPrepareFlag === 1 || selectedOrder.slowPrepareRecord"
+              :status="formatSlowPrepareLabel(selectedOrder)"
+              type="slow-prepare"
+            />
+          </div>
+          <div v-if="selectedOrder.slowPrepareFlag === 1 || selectedOrder.slowPrepareRecord" class="text-xs text-red-600 bg-red-50 rounded px-2 py-1.5">
+            <span>等待时长：{{ selectedOrder.slowPrepareRecord?.waitingMinutes ?? 12 }} 分钟</span>
+            <span v-if="selectedOrder.slowPrepareRecord?.scoreImpact" class="ml-2">
+              · 影响商户分数：-{{ selectedOrder.slowPrepareRecord.scoreImpact }} 分
+            </span>
           </div>
         </div>
 
@@ -63,6 +108,7 @@ const columns = [
   { key: 'customerAddress', label: '地址' },
   { key: 'totalAmount', label: '金额', sortable: true },
   { key: 'status', label: '状态' },
+  { key: 'slowAlert', label: '出餐提醒' },
   { key: 'createdAt', label: '创建时间', sortable: true },
   { key: 'actions', label: '操作' },
 ]
@@ -95,6 +141,16 @@ async function fetchOrders() {
   } finally {
     loading.value = false
   }
+}
+
+function formatWeatherLabel(w: any) {
+  const text = w.text || `${w.type}${w.level}`
+  return `${text}+${w.delayMinutes}min`
+}
+
+function formatSlowPrepareLabel(order: any) {
+  const waiting = order.slowPrepareRecord?.waitingMinutes ?? 12
+  return `出餐慢 ${waiting}min`
 }
 
 onMounted(fetchOrders)

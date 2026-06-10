@@ -26,6 +26,8 @@ export class SeedService implements OnModuleInit {
     this.seedExceptions();
     this.seedWeatherAlerts();
     this.seedPeakPlans();
+    this.seedCompensationRules();
+    this.seedMerchantPerformances();
   }
 
   private seedStations() {
@@ -347,13 +349,13 @@ export class SeedService implements OnModuleInit {
     const endStr = new Date(now.getTime() + 6 * 60 * 60 * 1000).toISOString().replace('T', ' ').split('.')[0];
 
     this.db.run(
-      `INSERT INTO weather_alert (station_id, type, level, description, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
-      [1, '暴雨', 'yellow', '预计未来6小时内有短时强降雨，请注意配送安全', startStr, endStr],
+      `INSERT INTO weather_alert (station_id, type, level, description, start_time, end_time, delivery_range_shrink, eta_add_minutes, shift_adjustment, shift_delay_minutes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [1, '暴雨', 'yellow', '预计未来6小时内有短时强降雨，请注意配送安全', startStr, endStr, 0.1, 15, 'delay', 30],
     );
 
     this.db.run(
-      `INSERT INTO weather_alert (station_id, type, level, description, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)`,
-      [2, '大风', 'orange', '预计未来6小时内有大风天气，风力6-7级，建议减少户外配送', startStr, endStr],
+      `INSERT INTO weather_alert (station_id, type, level, description, start_time, end_time, delivery_range_shrink, eta_add_minutes, shift_adjustment, shift_delay_minutes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [2, '高温', 'orange', '预计未来6小时内有大风天气，风力6-7级，建议减少户外配送', startStr, endStr, 0.15, 20, 'reduce', 0],
     );
   }
 
@@ -367,5 +369,64 @@ export class SeedService implements OnModuleInit {
       `INSERT INTO peak_plan (station_id, name, trigger_condition, actions, status) VALUES (?, ?, ?, ?, 'inactive')`,
       [2, '暴雨天气应急预案', '暴雨预警触发', '["暂停新订单接单", "延长配送时效30分钟", "通知商户延迟出餐"]'],
     );
+  }
+
+  private seedCompensationRules() {
+    this.db.run(
+      `INSERT INTO customer_compensation_rule (responsibility, rule_type, value, min_amount, max_amount, description) VALUES (?, ?, ?, ?, ?, ?)`,
+      ['platform', 'percent', 0.3, 5, 50, '平台责任：按订单金额30%补偿，5-50元区间'],
+    );
+    this.db.run(
+      `INSERT INTO customer_compensation_rule (responsibility, rule_type, value, min_amount, max_amount, description) VALUES (?, ?, ?, ?, ?, ?)`,
+      ['merchant', 'hybrid', 0.2, 5, 30, '商户责任：按订单金额20%补偿，5-30元区间'],
+    );
+    this.db.run(
+      `INSERT INTO customer_compensation_rule (responsibility, rule_type, value, min_amount, max_amount, description) VALUES (?, ?, ?, ?, ?, ?)`,
+      ['rider', 'percent', 0.5, 10, 100, '骑手责任：按订单金额50%补偿，10-100元区间'],
+    );
+    this.db.run(
+      `INSERT INTO customer_compensation_rule (responsibility, rule_type, value, min_amount, max_amount, description) VALUES (?, ?, ?, ?, ?, ?)`,
+      ['rider_wait', 'fixed', 15, 10, 25, '骑手等待补偿：每单固定15元，10-25元区间'],
+    );
+  }
+
+  private seedMerchantPerformances() {
+    const performances = [
+      { merchantId: 1, score: 96, totalOrders: 158, slowPrepareCount: 3, onTimeRate: 98.1, avgPrepareSeconds: 380 },
+      { merchantId: 2, score: 88, totalOrders: 210, slowPrepareCount: 12, onTimeRate: 94.3, avgPrepareSeconds: 520 },
+      { merchantId: 3, score: 92, totalOrders: 132, slowPrepareCount: 5, onTimeRate: 96.2, avgPrepareSeconds: 440 },
+      { merchantId: 4, score: 98, totalOrders: 185, slowPrepareCount: 1, onTimeRate: 99.5, avgPrepareSeconds: 300 },
+      { merchantId: 5, score: 90, totalOrders: 96, slowPrepareCount: 6, onTimeRate: 93.8, avgPrepareSeconds: 480 },
+      { merchantId: 6, score: 85, totalOrders: 145, slowPrepareCount: 10, onTimeRate: 93.1, avgPrepareSeconds: 560 },
+      { merchantId: 7, score: 94, totalOrders: 112, slowPrepareCount: 3, onTimeRate: 97.3, avgPrepareSeconds: 410 },
+      { merchantId: 8, score: 99, totalOrders: 78, slowPrepareCount: 0, onTimeRate: 100, avgPrepareSeconds: 260 },
+    ];
+
+    for (const p of performances) {
+      this.db.run(
+        `INSERT INTO merchant_performance (merchant_id, score, total_orders, slow_prepare_count, on_time_rate, avg_prepare_seconds, last_calculated_at)
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+        [p.merchantId, p.score, p.totalOrders, p.slowPrepareCount, p.onTimeRate, p.avgPrepareSeconds],
+      );
+    }
+
+    const ordersForSlow = this.db.all(
+      `SELECT id, merchant_id, arrived_store_at, picked_up_at 
+       FROM orders 
+       WHERE arrived_store_at IS NOT NULL AND picked_up_at IS NOT NULL
+       LIMIT 2`,
+    );
+
+    for (let i = 0; i < ordersForSlow.length; i++) {
+      const o = ordersForSlow[i];
+      const arrived = new Date(o.arrived_store_at).getTime();
+      const picked = new Date(o.picked_up_at).getTime();
+      const wait = Math.max(600, Math.floor((picked - arrived) / 1000) + i * 180);
+      this.db.run(
+        `INSERT INTO slow_prepare_record (order_id, merchant_id, arrived_store_at, merchant_confirmed_at, picked_up_at, wait_seconds, threshold_seconds, impact_score, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed')`,
+        [o.id, o.merchant_id, o.arrived_store_at, o.arrived_store_at, o.picked_up_at, wait, 600, Math.min(5, Math.ceil((wait - 600) / 120))],
+      );
+    }
   }
 }

@@ -87,8 +87,10 @@ export class DatabaseService implements OnModuleInit {
         total_amount REAL NOT NULL DEFAULT 0,
         delivery_fee REAL NOT NULL DEFAULT 0,
         estimated_delivery_time TEXT,
+        weather_affected TEXT NOT NULL DEFAULT '',
         accepted_at TEXT,
         arrived_store_at TEXT,
+        merchant_confirmed_at TEXT,
         picked_up_at TEXT,
         delivering_at TEXT,
         delivered_at TEXT,
@@ -96,6 +98,9 @@ export class DatabaseService implements OnModuleInit {
         prepare_started_at TEXT,
         prepare_completed_at TEXT,
         delivery_photo TEXT,
+        pickup_photo TEXT,
+        slow_prepare_flag INTEGER NOT NULL DEFAULT 0,
+        slow_prepare_wait_seconds INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
@@ -176,7 +181,51 @@ export class DatabaseService implements OnModuleInit {
         description TEXT NOT NULL DEFAULT '',
         start_time TEXT NOT NULL,
         end_time TEXT NOT NULL,
+        delivery_range_shrink REAL NOT NULL DEFAULT 0,
+        eta_add_minutes INTEGER NOT NULL DEFAULT 0,
+        shift_adjustment TEXT NOT NULL DEFAULT 'none' CHECK(shift_adjustment IN ('none', 'delay', 'reduce', 'cancel')),
+        shift_delay_minutes INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS merchant_performance (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        merchant_id INTEGER NOT NULL UNIQUE REFERENCES merchant(id),
+        score REAL NOT NULL DEFAULT 100,
+        total_orders INTEGER NOT NULL DEFAULT 0,
+        slow_prepare_count INTEGER NOT NULL DEFAULT 0,
+        on_time_rate REAL NOT NULL DEFAULT 100,
+        avg_prepare_seconds INTEGER NOT NULL DEFAULT 0,
+        last_calculated_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS slow_prepare_record (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL UNIQUE REFERENCES orders(id),
+        merchant_id INTEGER NOT NULL REFERENCES merchant(id),
+        arrived_store_at TEXT NOT NULL,
+        merchant_confirmed_at TEXT,
+        picked_up_at TEXT,
+        wait_seconds INTEGER NOT NULL DEFAULT 0,
+        threshold_seconds INTEGER NOT NULL DEFAULT 600,
+        pickup_photo TEXT,
+        impact_score REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'confirmed', 'appealed', 'ignored')),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS customer_compensation_rule (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        responsibility TEXT NOT NULL UNIQUE,
+        rule_type TEXT NOT NULL DEFAULT 'percent' CHECK(rule_type IN ('percent', 'fixed', 'hybrid')),
+        value REAL NOT NULL DEFAULT 0,
+        min_amount REAL NOT NULL DEFAULT 0,
+        max_amount REAL NOT NULL DEFAULT 0,
+        description TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
     `);
   }
@@ -195,6 +244,9 @@ export class DatabaseService implements OnModuleInit {
       CREATE INDEX IF NOT EXISTS idx_ticket_status ON ticket(status);
       CREATE INDEX IF NOT EXISTS idx_compensation_ticket ON compensation(ticket_id);
       CREATE INDEX IF NOT EXISTS idx_compensation_status ON compensation(status);
+      CREATE INDEX IF NOT EXISTS idx_weather_alert_station ON weather_alert(station_id, start_time);
+      CREATE INDEX IF NOT EXISTS idx_slow_prepare_merchant ON slow_prepare_record(merchant_id, status);
+      CREATE INDEX IF NOT EXISTS idx_merchant_performance_score ON merchant_performance(score);
     `);
   }
 

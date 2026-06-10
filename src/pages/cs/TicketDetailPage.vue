@@ -42,6 +42,74 @@
     </div>
 
     <div class="card">
+      <h3 class="font-semibold text-text mb-4">订单上下文信息</h3>
+      <div v-if="orderContext" class="space-y-4 text-sm">
+        <div>
+          <h4 class="font-medium text-text mb-2">天气影响</h4>
+          <div v-if="orderContext.isWeatherAffected && orderContext.weatherAlerts?.length" class="bg-yellow-50 border border-yellow-200 rounded-md p-3 space-y-2">
+            <div v-for="(alert, idx) in orderContext.weatherAlerts" :key="idx" class="space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="inline-block px-2 py-0.5 text-xs font-medium bg-yellow-500 text-white rounded">{{ alert.type }}</span>
+                <span class="inline-block px-2 py-0.5 text-xs font-medium bg-orange-500 text-white rounded">{{ alert.level }}</span>
+              </div>
+              <div class="text-text-light">{{ alert.description }}</div>
+              <div v-if="alert.etaExtension" class="text-orange-600 font-medium">ETA 延长: {{ alert.etaExtension }} 分钟</div>
+            </div>
+          </div>
+          <div v-else class="text-text-muted">无天气影响</div>
+        </div>
+        <div>
+          <h4 class="font-medium text-text mb-2">出餐慢记录</h4>
+          <div v-if="orderContext.slowPrepare" class="bg-gray-50 border border-gray-200 rounded-md p-3 space-y-2">
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <span class="text-text-light">阈值:</span>
+                <span class="ml-2">{{ orderContext.slowPrepare.thresholdSeconds }} 秒</span>
+              </div>
+              <div>
+                <span class="text-text-light">已等待:</span>
+                <span class="ml-2">{{ orderContext.slowPrepare.waitedSeconds }} 秒</span>
+              </div>
+              <div>
+                <span class="text-text-light">是否超标:</span>
+                <span class="ml-2" :class="orderContext.slowPrepare.isOverThreshold ? 'text-red-600 font-medium' : 'text-green-600'">
+                  {{ orderContext.slowPrepare.isOverThreshold ? '是' : '否' }}
+                </span>
+              </div>
+              <div v-if="orderContext.slowPrepare.impactScore !== undefined">
+                <span class="text-text-light">影响评分:</span>
+                <span class="ml-2">{{ orderContext.slowPrepare.impactScore }}</span>
+              </div>
+            </div>
+            <div v-if="orderContext.slowPrepare.record?.photo" class="mt-2">
+              <span class="text-text-light">照片:</span>
+              <img :src="orderContext.slowPrepare.record.photo" alt="出餐慢照片" class="mt-1 max-w-xs rounded border border-gray-200" />
+            </div>
+          </div>
+          <div v-else class="text-text-muted">无出餐慢记录</div>
+        </div>
+      </div>
+      <div v-else class="text-sm text-text-muted">暂无订单上下文信息</div>
+    </div>
+
+    <div v-if="orderContext?.recommendedResponsibility" class="card">
+      <h3 class="font-semibold text-text mb-4">系统责任判定建议</h3>
+      <div class="space-y-3 text-sm">
+        <div>
+          <span class="text-text-light">推荐责任方:</span>
+          <span class="ml-2 font-medium text-accent">{{ responsibilityLabel(orderContext.recommendedResponsibility.primary) }}</span>
+        </div>
+        <div>
+          <span class="text-text-light">说明:</span>
+          <span class="ml-2">{{ orderContext.recommendedResponsibility.reason || '-' }}</span>
+        </div>
+        <div v-if="orderContext.recommendedResponsibility.excludeRider" class="bg-red-50 border border-red-200 rounded-md p-3 text-red-700 font-medium">
+          ⚠️ 建议排除骑手责任
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <h3 class="font-semibold text-text mb-4">事件时间线</h3>
       <div class="space-y-3">
         <div
@@ -70,15 +138,18 @@
             <option value="">请选择</option>
             <option value="platform">平台</option>
             <option value="merchant">商户</option>
-            <option value="rider">骑手</option>
+            <option value="rider" :disabled="isRiderDisabled">骑手{{ isRiderDisabled ? ' (建议排除)' : '' }}</option>
             <option value="customer">客户</option>
           </select>
+          <p v-if="isRiderDisabled && judgeForm.responsibility === 'rider'" class="mt-1 text-xs text-red-600">
+            ⚠️ 根据系统建议，骑手责任已被排除，请选择其他责任方
+          </p>
         </div>
         <div>
           <label class="block text-sm font-medium text-text mb-1">处理方案</label>
           <textarea v-model="judgeForm.resolution" class="input-field" rows="3" required placeholder="请输入处理方案"></textarea>
         </div>
-        <button type="submit" class="btn-primary" :disabled="judging">
+        <button type="submit" class="btn-primary" :disabled="judging || (isRiderDisabled && judgeForm.responsibility === 'rider')">
           {{ judging ? '判定中...' : '判定责任' }}
         </button>
       </form>
@@ -104,7 +175,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useTicketsStore } from '@/stores/tickets'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -116,12 +187,17 @@ const ticketId = computed(() => Number(route.params.id))
 const ticket = computed(() => ticketsStore.currentTicket)
 
 const exception = ref<any>(null)
+const orderContext = ref<any>(null)
 const judging = ref(false)
 const compensating = ref(false)
 
 const judgeForm = reactive({
   responsibility: '',
   resolution: '',
+})
+
+const isRiderDisabled = computed(() => {
+  return orderContext.value?.recommendedResponsibility?.excludeRider === true
 })
 
 const priorityClass = computed(() => {
@@ -165,6 +241,26 @@ function responsibilityLabel(r?: string) {
   return map[r || ''] || r || '-'
 }
 
+watch(orderContext, (newCtx) => {
+  const recommended = newCtx?.recommendedResponsibility
+  if (recommended?.primary && !judgeForm.responsibility) {
+    const validValues = ['platform', 'merchant', 'rider', 'customer']
+    if (validValues.includes(recommended.primary)) {
+      if (recommended.excludeRider && recommended.primary === 'rider') {
+        return
+      }
+      judgeForm.responsibility = recommended.primary
+    }
+  }
+}, { immediate: true })
+
+async function fetchOrderContext(orderId: string | number) {
+  try {
+    const res = await api.get(`/orders/${orderId}/context`)
+    orderContext.value = res.data || null
+  } catch {}
+}
+
 async function judgeTicket() {
   judging.value = true
   try {
@@ -187,11 +283,15 @@ async function compensateTicket() {
 
 onMounted(async () => {
   await ticketsStore.fetchTicket(ticketId.value)
-  try {
-    const res = await api.get('/exceptions', {
-      params: { orderId: ticket.value?.orderId },
-    })
-    exception.value = res.data?.[0] || null
-  } catch {}
+  const orderId = ticket.value?.orderId
+  if (orderId) {
+    try {
+      const res = await api.get('/exceptions', {
+        params: { orderId },
+      })
+      exception.value = res.data?.[0] || null
+    } catch {}
+    await fetchOrderContext(orderId)
+  }
 })
 </script>

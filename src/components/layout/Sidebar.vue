@@ -43,6 +43,8 @@ import {
   Headphones,
   TicketCheck,
   Banknote,
+  Award,
+  Clock,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -55,6 +57,7 @@ const navConfigs: Record<string, Array<{ path: string; label: string; icon: any 
     { path: '/station/areas', label: '区域配置', icon: MapPin },
     { path: '/station/weather', label: '天气预警', icon: CloudSun },
     { path: '/station/peak-plan', label: '高峰预案', icon: Zap },
+    { path: '/station/merchant-performance', label: '商户履约', icon: Award },
     { path: '/heatmap', label: '订单热区', icon: Flame },
   ],
   rider: [
@@ -64,6 +67,7 @@ const navConfigs: Record<string, Array<{ path: string; label: string; icon: any 
   ],
   merchant: [
     { path: '/merchant', label: '出餐确认', icon: Store },
+    { path: '/merchant/slow-prepare', label: '出餐慢记录', icon: Clock },
     { path: '/merchant/exceptions', label: '异常上报', icon: AlertTriangle },
     { path: '/merchant/orders', label: '订单跟踪', icon: Search },
   ],
