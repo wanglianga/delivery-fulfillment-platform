@@ -124,7 +124,7 @@ export class OrdersController {
     @UploadedFile() file: Express.Multer.File,
     @CurrentUser() user: any,
   ) {
-    const photoUrl = `/api/uploads/${file.filename}`;
+    const photoUrl = `/uploads/${file.filename}`;
     return this.ordersService.deliverPhoto(id, photoUrl, user.name);
   }
 
