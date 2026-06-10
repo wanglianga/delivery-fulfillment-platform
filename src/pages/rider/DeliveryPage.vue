@@ -18,6 +18,10 @@
           <span class="ml-2 font-medium">{{ order?.orderNo || '-' }}</span>
         </div>
         <div>
+          <span class="text-text-light">商户:</span>
+          <span class="ml-2 font-medium">{{ order?.merchantName || '-' }}</span>
+        </div>
+        <div>
           <span class="text-text-light">客户:</span>
           <span class="ml-2 font-medium">{{ order?.customerName || '-' }}</span>
         </div>
@@ -28,6 +32,13 @@
         <div>
           <span class="text-text-light">金额:</span>
           <span class="ml-2 font-medium">¥{{ order?.totalAmount ?? '-' }}</span>
+        </div>
+        <div>
+          <span class="text-text-light">送达照片:</span>
+          <span class="ml-2">
+            <img v-if="order?.deliveryPhoto" :src="order.deliveryPhoto" class="inline w-16 h-16 object-cover rounded" />
+            <span v-else class="text-text-muted">未上传</span>
+          </span>
         </div>
       </div>
     </div>
@@ -76,13 +87,32 @@
         />
         <button
           v-if="canAction('sign')"
-          class="btn-success"
+          class="bg-success hover:bg-success/90 text-white px-4 py-2 rounded-lg font-medium transition-colors"
           :disabled="acting"
           @click="doAction('sign', '确认签收')"
         >
           <CheckCircle class="w-4 h-4 mr-1 inline" /> 确认签收
         </button>
       </div>
+    </div>
+
+    <div class="card">
+      <h3 class="font-semibold text-text mb-3">配送时间线</h3>
+      <div v-if="order?.timeline?.length" class="space-y-2">
+        <div
+          v-for="(evt, idx) in order.timeline"
+          :key="idx"
+          class="flex items-start gap-3 text-sm"
+        >
+          <div class="w-2 h-2 rounded-full mt-1.5 shrink-0"
+               :class="idx === order.timeline.length - 1 ? 'bg-accent' : 'bg-border'"></div>
+          <div>
+            <span class="font-medium text-text">{{ evt.detail || evt.event }}</span>
+            <span class="text-text-muted ml-2">{{ formatTime(evt.timestamp) }}</span>
+          </div>
+        </div>
+      </div>
+      <div v-else class="text-text-muted text-sm">暂无记录</div>
     </div>
 
     <div class="card">
@@ -123,44 +153,41 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { useOrdersStore } from '@/stores/orders'
+import api from '@/api'
 import StatusBadge from '@/components/StatusBadge.vue'
 import StepProgress from '@/components/StepProgress.vue'
 import Modal from '@/components/Modal.vue'
-import api from '@/api'
 import { MapPin, Package, Truck, Camera, CheckCircle, AlertTriangle } from 'lucide-vue-next'
 
 const route = useRoute()
-const ordersStore = useOrdersStore()
 const orderId = computed(() => Number(route.params.id))
 
-const order = computed(() => ordersStore.currentOrder)
+const order = ref<any>(null)
 const acting = ref(false)
 const photoInput = ref<HTMLInputElement | null>(null)
 const showExceptionModal = ref(false)
 const submitting = ref(false)
 
-const deliverySteps = ['到店', '取货', '配送', '送达', '签收']
+const deliverySteps = ['接单', '到店', '取货', '配送', '送达', '签收']
 
 const stepIndexMap: Record<string, number> = {
   pending: 0,
   accepted: 0,
-  arrived_store: 0,
-  picked_up: 1,
-  delivering: 2,
-  deliver_photo: 3,
-  signed: 4,
-  completed: 4,
+  arrived_store: 1,
+  picked_up: 2,
+  delivering: 3,
+  delivered: 4,
+  signed: 5,
 }
 
 const currentStepIndex = computed(() => stepIndexMap[order.value?.status || ''] ?? 0)
 
 const actionVisibility: Record<string, string[]> = {
-  arrive_store: ['accepted', 'arrived_store'],
+  arrive_store: ['accepted'],
   pick_up: ['arrived_store'],
   deliver: ['picked_up'],
   deliver_photo: ['delivering'],
-  sign: ['delivering', 'deliver_photo'],
+  sign: ['delivered'],
 }
 
 function canAction(action: string) {
@@ -168,16 +195,22 @@ function canAction(action: string) {
   return allowedStatuses.includes(order.value?.status || '')
 }
 
-async function doAction(action: string, label: string) {
+async function fetchOrder() {
+  try {
+    const res = await api.get(`/orders/${orderId.value}`)
+    order.value = res.data
+  } catch {
+    order.value = null
+  }
+}
+
+async function doAction(action: string, _label: string) {
   acting.value = true
   try {
-    switch (action) {
-      case 'arrive-store': await ordersStore.arriveStore(orderId.value); break
-      case 'pick-up': await ordersStore.pickUp(orderId.value); break
-      case 'deliver': await ordersStore.deliver(orderId.value); break
-      case 'sign': await ordersStore.sign(orderId.value); break
-    }
-    await ordersStore.fetchOrder(orderId.value)
+    await api.post(`/orders/${orderId.value}/${action}`)
+    await fetchOrder()
+  } catch (e) {
+    console.error('操作失败', e)
   } finally {
     acting.value = false
   }
@@ -192,12 +225,24 @@ async function uploadPhoto(event: Event) {
   if (!input.files?.length) return
   acting.value = true
   try {
-    await ordersStore.deliverPhoto(orderId.value, input.files[0])
-    await ordersStore.fetchOrder(orderId.value)
+    const formData = new FormData()
+    formData.append('photo', input.files[0])
+    await api.post(`/orders/${orderId.value}/deliver-photo`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    await fetchOrder()
+  } catch (e) {
+    console.error('上传失败', e)
   } finally {
     acting.value = false
     input.value = ''
   }
+}
+
+function formatTime(ts: string) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
 }
 
 const exceptionForm = reactive({
@@ -216,10 +261,12 @@ async function submitException() {
     showExceptionModal.value = false
     exceptionForm.type = 'rainstorm'
     exceptionForm.description = ''
+  } catch (e) {
+    console.error('上报异常失败', e)
   } finally {
     submitting.value = false
   }
 }
 
-onMounted(() => ordersStore.fetchOrder(orderId.value))
+onMounted(fetchOrder)
 </script>

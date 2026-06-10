@@ -70,10 +70,10 @@ import { Truck, BarChart3, Bike, Store, Headphones } from 'lucide-vue-next'
 const auth = useAuthStore()
 
 const roles = [
-  { value: 'station', label: '站点', icon: BarChart3, username: 'station1' },
-  { value: 'rider', label: '骑手', icon: Bike, username: 'rider1' },
-  { value: 'merchant', label: '商户', icon: Store, username: 'merchant1' },
-  { value: 'cs', label: '客服', icon: Headphones, username: 'cs1' },
+  { value: 'station', label: '站点', icon: BarChart3, username: 'station_a' },
+  { value: 'rider', label: '骑手', icon: Bike, username: 'rider_zhangming' },
+  { value: 'merchant', label: '商户', icon: Store, username: 'merchant_1' },
+  { value: 'cs', label: '客服', icon: Headphones, username: 'cs_a' },
 ]
 
 const selectedRole = ref('')

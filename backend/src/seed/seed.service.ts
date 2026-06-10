@@ -173,7 +173,7 @@ export class SeedService implements OnModuleInit {
 
   private seedOrders(now: string, tomorrow: string) {
     const orders = [
-      { stationId: 1, merchantId: 1, riderId: 1, status: 'pending', customer: '张先生', address: '朝阳区建国路100号', amount: 58, fee: 5 },
+      { stationId: 1, merchantId: 1, riderId: null, status: 'pending', customer: '张先生', address: '朝阳区建国路100号', amount: 58, fee: 5 },
       { stationId: 1, merchantId: 2, riderId: null, status: 'pending', customer: '李女士', address: '朝阳区望京花园', amount: 42, fee: 5 },
       { stationId: 1, merchantId: 3, riderId: null, status: 'pending', customer: '王先生', address: '朝阳区三里屯SOHO', amount: 35, fee: 6 },
       { stationId: 1, merchantId: 4, riderId: null, status: 'pending', customer: '赵女士', address: '朝阳区国贸CBD', amount: 28, fee: 5 },

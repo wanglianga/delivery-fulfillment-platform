@@ -31,12 +31,14 @@ export class OrdersController {
     @Query('stationId') stationId?: string,
     @Query('merchantId') merchantId?: string,
     @Query('riderId') riderId?: string,
+    @Query('riderIdNull') riderIdNull?: string,
   ) {
     return this.ordersService.findAll({
       status,
       stationId: stationId ? Number(stationId) : undefined,
       merchantId: merchantId ? Number(merchantId) : undefined,
       riderId: riderId ? Number(riderId) : undefined,
+      riderIdNull: riderIdNull === 'true',
     });
   }
 

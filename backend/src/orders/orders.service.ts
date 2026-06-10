@@ -13,6 +13,7 @@ export class OrdersService {
     stationId?: number;
     merchantId?: number;
     riderId?: number;
+    riderIdNull?: boolean;
   }) {
     let sql = `SELECT o.*, m.name as merchant_name, u.name as rider_name
                FROM orders o
@@ -22,8 +23,14 @@ export class OrdersService {
     const params: any[] = [];
 
     if (query?.status) {
-      sql += ` AND o.status = ?`;
-      params.push(query.status);
+      const statuses = query.status.split(',').map((s) => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        sql += ` AND o.status = ?`;
+        params.push(statuses[0]);
+      } else if (statuses.length > 1) {
+        sql += ` AND o.status IN (${statuses.map(() => '?').join(', ')})`;
+        params.push(...statuses);
+      }
     }
     if (query?.stationId) {
       sql += ` AND o.station_id = ?`;
@@ -33,7 +40,9 @@ export class OrdersService {
       sql += ` AND o.merchant_id = ?`;
       params.push(query.merchantId);
     }
-    if (query?.riderId) {
+    if (query?.riderIdNull) {
+      sql += ` AND o.rider_id IS NULL`;
+    } else if (query?.riderId) {
       sql += ` AND o.rider_id = ?`;
       params.push(query.riderId);
     }
