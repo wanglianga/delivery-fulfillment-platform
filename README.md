@@ -180,6 +180,34 @@ docker compose down -v
 └── .dockerignore             # 前端 Docker 忽略文件
 ```
 
+## 新增 API 接口
+
+### 事故转派
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | /orders/:id/report-accident | 骑手上报事故（body: accidentType, description, photos） |
+| GET | /orders/:id/nearby-riders | 查找附近骑手（返回 available + busy 列表） |
+| POST | /orders/:id/reassign | 转派订单（body: newRiderId, responsibilitySplit） |
+| GET | /orders/reassigning | 获取转派中订单列表（query: stationId） |
+| GET | /orders/:id/reassign-records | 获取订单转派记录 |
+
+### 顾客地址修正
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | /orders/:id/request-address-change | 请求地址变更（body: newAddress） |
+| POST | /orders/:id/confirm-address-change | 骑手确认地址变更 |
+| POST | /orders/:id/reject-address-change | 拒绝地址变更（body: reason） |
+| GET | /orders/:id/address-change-records | 获取地址变更记录 |
+
+### 新增订单状态
+
+| 状态 | 标签 | 说明 |
+|------|------|------|
+| reassigning | 转派中 | 骑手事故后订单等待转派 |
+| pending_negotiation | 待协商 | 顾客修改地址等待骑手确认 |
+
 ## 功能模块说明
 
 ### 恶劣天气运力调整

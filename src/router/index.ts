@@ -65,6 +65,12 @@ const routes: RouteRecordRaw[] = [
         meta: { roles: ['station'] },
       },
       {
+        path: 'station/accident-reassign',
+        name: 'station-accident-reassign',
+        component: () => import('@/pages/station/AccidentReassignPage.vue'),
+        meta: { roles: ['station'] },
+      },
+      {
         path: 'heatmap',
         name: 'heatmap',
         component: () => import('@/pages/HeatmapPage.vue'),

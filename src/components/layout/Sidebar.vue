@@ -45,6 +45,7 @@ import {
   Banknote,
   Award,
   Clock,
+  Repeat,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -58,6 +59,7 @@ const navConfigs: Record<string, Array<{ path: string; label: string; icon: any 
     { path: '/station/weather', label: '天气预警', icon: CloudSun },
     { path: '/station/peak-plan', label: '高峰预案', icon: Zap },
     { path: '/station/merchant-performance', label: '商户履约', icon: Award },
+    { path: '/station/accident-reassign', label: '事故转派', icon: Repeat },
     { path: '/heatmap', label: '订单热区', icon: Flame },
   ],
   rider: [

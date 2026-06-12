@@ -82,7 +82,7 @@ export class DatabaseService implements OnModuleInit {
         customer_name TEXT NOT NULL,
         customer_address TEXT NOT NULL,
         customer_phone TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'arrived_store', 'picked_up', 'delivering', 'delivered', 'signed', 'exception')),
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'arrived_store', 'picked_up', 'delivering', 'delivered', 'signed', 'exception', 'reassigning', 'pending_negotiation')),
         items TEXT NOT NULL DEFAULT '[]',
         total_amount REAL NOT NULL DEFAULT 0,
         delivery_fee REAL NOT NULL DEFAULT 0,
@@ -101,6 +101,46 @@ export class DatabaseService implements OnModuleInit {
         pickup_photo TEXT,
         slow_prepare_flag INTEGER NOT NULL DEFAULT 0,
         slow_prepare_wait_seconds INTEGER NOT NULL DEFAULT 0,
+        original_customer_address TEXT,
+        address_change_extra_distance REAL NOT NULL DEFAULT 0,
+        address_change_extra_fee REAL NOT NULL DEFAULT 0,
+        address_change_out_of_area INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS order_reassign (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL REFERENCES orders(id),
+        original_rider_id INTEGER NOT NULL REFERENCES user(id),
+        new_rider_id INTEGER REFERENCES user(id),
+        accident_type TEXT NOT NULL CHECK(accident_type IN ('crash', 'vehicle_breakdown', 'other')),
+        accident_description TEXT NOT NULL DEFAULT '',
+        accident_photos TEXT NOT NULL DEFAULT '[]',
+        original_rider_segment TEXT NOT NULL DEFAULT '',
+        new_rider_segment TEXT NOT NULL DEFAULT '',
+        responsibility_split TEXT NOT NULL DEFAULT '{}',
+        original_rider_responsibility REAL NOT NULL DEFAULT 0,
+        new_rider_responsibility REAL NOT NULL DEFAULT 0,
+        platform_responsibility REAL NOT NULL DEFAULT 0,
+        reassigned_at TEXT,
+        accepted_at TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'completed', 'cancelled')),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS address_change_request (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL REFERENCES orders(id),
+        requested_by INTEGER NOT NULL REFERENCES user(id),
+        original_address TEXT NOT NULL,
+        new_address TEXT NOT NULL,
+        extra_distance REAL NOT NULL DEFAULT 0,
+        extra_fee REAL NOT NULL DEFAULT 0,
+        out_of_area INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'rider_confirmed', 'rider_rejected', 'system_rejected', 'cancelled')),
+        rider_id INTEGER REFERENCES user(id),
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
@@ -247,6 +287,11 @@ export class DatabaseService implements OnModuleInit {
       CREATE INDEX IF NOT EXISTS idx_weather_alert_station ON weather_alert(station_id, start_time);
       CREATE INDEX IF NOT EXISTS idx_slow_prepare_merchant ON slow_prepare_record(merchant_id, status);
       CREATE INDEX IF NOT EXISTS idx_merchant_performance_score ON merchant_performance(score);
+      CREATE INDEX IF NOT EXISTS idx_order_reassign_order ON order_reassign(order_id);
+      CREATE INDEX IF NOT EXISTS idx_order_reassign_original_rider ON order_reassign(original_rider_id);
+      CREATE INDEX IF NOT EXISTS idx_order_reassign_new_rider ON order_reassign(new_rider_id);
+      CREATE INDEX IF NOT EXISTS idx_address_change_order ON address_change_request(order_id);
+      CREATE INDEX IF NOT EXISTS idx_address_change_status ON address_change_request(status);
     `);
   }
 

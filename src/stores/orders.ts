@@ -35,6 +35,12 @@ export interface Order {
   weatherAffected?: WeatherAffectedItem[]
   slowPrepareFlag?: number
   slowPrepareRecord?: SlowPrepareRecord
+  reassignRecords?: any[]
+  addressChangeRecords?: any[]
+  originalCustomerAddress?: string
+  addressChangeExtraDistance?: number
+  addressChangeExtraFee?: number
+  addressChangeOutOfArea?: number
   createdAt: string
   updatedAt: string
 }
@@ -109,6 +115,43 @@ export const useOrdersStore = defineStore('orders', () => {
     return res.data
   }
 
+  async function reportAccident(id: number, data: { accidentType: string; description: string; photos?: string[] }) {
+    const res = await api.post(`/orders/${id}/report-accident`, data)
+    return res.data
+  }
+
+  async function findNearbyRiders(id: number) {
+    const res = await api.get(`/orders/${id}/nearby-riders`)
+    return res.data
+  }
+
+  async function reassignOrder(id: number, data: { newRiderId: number; responsibilitySplit?: { originalRider: number; newRider: number; platform: number } }) {
+    const res = await api.post(`/orders/${id}/reassign`, data)
+    return res.data
+  }
+
+  async function fetchReassigningOrders(stationId?: number) {
+    const params: Record<string, string> = {}
+    if (stationId) params.stationId = String(stationId)
+    const res = await api.get('/orders/reassigning', { params })
+    return res.data
+  }
+
+  async function requestAddressChange(id: number, newAddress: string) {
+    const res = await api.post(`/orders/${id}/request-address-change`, { newAddress })
+    return res.data
+  }
+
+  async function confirmAddressChange(id: number) {
+    const res = await api.post(`/orders/${id}/confirm-address-change`)
+    return res.data
+  }
+
+  async function rejectAddressChange(id: number, reason: string) {
+    const res = await api.post(`/orders/${id}/reject-address-change`, { reason })
+    return res.data
+  }
+
   return {
     orders,
     currentOrder,
@@ -123,5 +166,12 @@ export const useOrdersStore = defineStore('orders', () => {
     sign,
     merchantPrepare,
     merchantReady,
+    reportAccident,
+    findNearbyRiders,
+    reassignOrder,
+    fetchReassigningOrders,
+    requestAddressChange,
+    confirmAddressChange,
+    rejectAddressChange,
   }
 })

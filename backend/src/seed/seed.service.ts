@@ -28,6 +28,7 @@ export class SeedService implements OnModuleInit {
     this.seedPeakPlans();
     this.seedCompensationRules();
     this.seedMerchantPerformances();
+    this.seedReassignAndAddressChange();
   }
 
   private seedStations() {
@@ -195,6 +196,8 @@ export class SeedService implements OnModuleInit {
       { stationId: 2, merchantId: 5, riderId: 13, status: 'signed', customer: '高先生', address: '海淀区清华园', amount: 95, fee: 5 },
       { stationId: 2, merchantId: 6, riderId: 14, status: 'signed', customer: '田女士', address: '海淀区北太平庄', amount: 36, fee: 6 },
       { stationId: 2, merchantId: 8, riderId: 15, status: 'exception', customer: '罗先生', address: '海淀区西土城', amount: 41, fee: 5 },
+      { stationId: 1, merchantId: 1, riderId: 4, status: 'reassigning', customer: '范先生', address: '朝阳区大望路SOHO', amount: 55, fee: 6 },
+      { stationId: 2, merchantId: 5, riderId: 11, status: 'pending_negotiation', customer: '蒋女士', address: '海淀区蓝旗营小区', amount: 68, fee: 5 },
     ];
 
     const itemsOptions = [
@@ -218,6 +221,8 @@ export class SeedService implements OnModuleInit {
       [{ name: '铜锅涮肉', quantity: 1, price: 95 }],
       [{ name: '口水鸡', quantity: 1, price: 36 }],
       [{ name: '扁肉拌面', quantity: 1, price: 18 }, { name: '卤蛋', quantity: 1, price: 5 }],
+      [{ name: '水煮牛肉', quantity: 1, price: 48 }, { name: '米饭', quantity: 1, price: 5 }],
+      [{ name: '铜锅涮肉（小份）', quantity: 1, price: 58 }, { name: '酸梅汤', quantity: 1, price: 10 }],
     ];
 
     for (let i = 0; i < orders.length; i++) {
@@ -241,10 +246,10 @@ export class SeedService implements OnModuleInit {
           o.amount,
           o.fee,
           estTime,
-          ['accepted', 'arrived_store', 'picked_up', 'delivering', 'delivered', 'signed', 'exception'].includes(o.status) ? new Date(Date.now() - 30 * 60 * 1000).toISOString() : null,
-          ['arrived_store', 'picked_up', 'delivering', 'delivered', 'signed', 'exception'].includes(o.status) ? new Date(Date.now() - 25 * 60 * 1000).toISOString() : null,
-          ['picked_up', 'delivering', 'delivered', 'signed', 'exception'].includes(o.status) ? new Date(Date.now() - 20 * 60 * 1000).toISOString() : null,
-          ['delivering', 'delivered', 'signed', 'exception'].includes(o.status) ? new Date(Date.now() - 15 * 60 * 1000).toISOString() : null,
+          ['accepted', 'arrived_store', 'picked_up', 'delivering', 'delivered', 'signed', 'exception', 'reassigning', 'pending_negotiation'].includes(o.status) ? new Date(Date.now() - 30 * 60 * 1000).toISOString() : null,
+          ['arrived_store', 'picked_up', 'delivering', 'delivered', 'signed', 'exception', 'reassigning', 'pending_negotiation'].includes(o.status) ? new Date(Date.now() - 25 * 60 * 1000).toISOString() : null,
+          ['picked_up', 'delivering', 'delivered', 'signed', 'exception', 'reassigning', 'pending_negotiation'].includes(o.status) ? new Date(Date.now() - 20 * 60 * 1000).toISOString() : null,
+          ['delivering', 'delivered', 'signed', 'exception', 'reassigning'].includes(o.status) ? new Date(Date.now() - 15 * 60 * 1000).toISOString() : null,
           ['delivered', 'signed'].includes(o.status) ? new Date(Date.now() - 5 * 60 * 1000).toISOString() : null,
           ['signed'].includes(o.status) ? new Date(Date.now() - 2 * 60 * 1000).toISOString() : null,
         ],
@@ -258,16 +263,16 @@ export class SeedService implements OnModuleInit {
 
       if (o.riderId) {
         const rider = this.db.get('SELECT name FROM user WHERE id = ?', [o.riderId]);
-        if (['accepted', 'arrived_store', 'picked_up', 'delivering', 'delivered', 'signed', 'exception'].includes(o.status)) {
+        if (['accepted', 'arrived_store', 'picked_up', 'delivering', 'delivered', 'signed', 'exception', 'reassigning', 'pending_negotiation'].includes(o.status)) {
           this.db.run(`INSERT INTO order_timeline (order_id, event, operator, detail) VALUES (?, 'accepted', ?, '骑手接单')`, [orderId, rider?.name || '']);
         }
-        if (['arrived_store', 'picked_up', 'delivering', 'delivered', 'signed', 'exception'].includes(o.status)) {
+        if (['arrived_store', 'picked_up', 'delivering', 'delivered', 'signed', 'exception', 'reassigning', 'pending_negotiation'].includes(o.status)) {
           this.db.run(`INSERT INTO order_timeline (order_id, event, operator, detail) VALUES (?, 'arrived_store', ?, '骑手到店')`, [orderId, rider?.name || '']);
         }
-        if (['picked_up', 'delivering', 'delivered', 'signed', 'exception'].includes(o.status)) {
+        if (['picked_up', 'delivering', 'delivered', 'signed', 'exception', 'reassigning', 'pending_negotiation'].includes(o.status)) {
           this.db.run(`INSERT INTO order_timeline (order_id, event, operator, detail) VALUES (?, 'picked_up', ?, '骑手取货')`, [orderId, rider?.name || '']);
         }
-        if (['delivering', 'delivered', 'signed', 'exception'].includes(o.status)) {
+        if (['delivering', 'delivered', 'signed', 'exception', 'reassigning'].includes(o.status)) {
           this.db.run(`INSERT INTO order_timeline (order_id, event, operator, detail) VALUES (?, 'delivering', ?, '骑手配送中')`, [orderId, rider?.name || '']);
         }
         if (['delivered', 'signed'].includes(o.status)) {
@@ -278,6 +283,12 @@ export class SeedService implements OnModuleInit {
         }
         if (o.status === 'exception') {
           this.db.run(`INSERT INTO order_timeline (order_id, event, operator, detail) VALUES (?, 'exception', ?, '订单标记为异常')`, [orderId, rider?.name || '']);
+        }
+        if (o.status === 'reassigning') {
+          this.db.run(`INSERT INTO order_timeline (order_id, event, operator, detail) VALUES (?, 'accident_reported', ?, '骑手上报事故(摔车)：配送途中摔车，无法继续配送')`, [orderId, rider?.name || '']);
+        }
+        if (o.status === 'pending_negotiation') {
+          this.db.run(`INSERT INTO order_timeline (order_id, event, operator, detail) VALUES (?, 'address_change_requested', '顾客', '顾客修改地址')`, [orderId]);
         }
       }
     }
@@ -427,6 +438,76 @@ export class SeedService implements OnModuleInit {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed')`,
         [o.id, o.merchant_id, o.arrived_store_at, o.arrived_store_at, o.picked_up_at, wait, 600, Math.min(5, Math.ceil((wait - 600) / 120))],
       );
+    }
+  }
+
+  private seedReassignAndAddressChange() {
+    const reassigningOrder = this.db.get("SELECT * FROM orders WHERE status = 'reassigning' LIMIT 1");
+    if (reassigningOrder) {
+      const rider = this.db.get('SELECT name FROM user WHERE id = ?', [reassigningOrder.rider_id]);
+      const originalSegment = JSON.stringify({
+        riderId: reassigningOrder.rider_id,
+        riderName: rider?.name || '',
+        fromStatus: 'delivering',
+        fromTime: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+        toTime: null,
+      });
+
+      this.db.run(
+        `INSERT INTO order_reassign (order_id, original_rider_id, new_rider_id, accident_type, accident_description, accident_photos, original_rider_segment, status)
+         VALUES (?, ?, NULL, 'crash', '配送途中摔车，无法继续配送', '[]', ?, 'pending')`,
+        [reassigningOrder.id, reassigningOrder.rider_id, originalSegment],
+      );
+    }
+
+    const pendingNegOrder = this.db.get("SELECT * FROM orders WHERE status = 'pending_negotiation' LIMIT 1");
+    if (pendingNegOrder) {
+      this.db.run(
+        `UPDATE orders SET
+          original_customer_address = '海淀区五道口华联',
+          address_change_extra_distance = 2.5,
+          address_change_extra_fee = 5.0,
+          address_change_out_of_area = 0
+         WHERE id = ?`,
+        [pendingNegOrder.id],
+      );
+
+      this.db.run(
+        `INSERT INTO address_change_request (order_id, requested_by, original_address, new_address, extra_distance, extra_fee, out_of_area, status, rider_id)
+         VALUES (?, ?, '海淀区五道口华联', ?, 2.5, 5.0, 0, 'pending', ?)`,
+        [pendingNegOrder.id, pendingNegOrder.rider_id, pendingNegOrder.customer_address, pendingNegOrder.rider_id],
+      );
+    }
+
+    const deliveredOrder = this.db.get(
+      `SELECT * FROM orders WHERE status = 'delivered' AND rider_id IS NOT NULL LIMIT 1`,
+    );
+    if (deliveredOrder) {
+      const rider = this.db.get('SELECT name FROM user WHERE id = ?', [deliveredOrder.rider_id]);
+      const newRider = this.db.get("SELECT id, name FROM user WHERE role = 'rider' AND id != ? AND station_id = ? LIMIT 1", [deliveredOrder.rider_id, deliveredOrder.station_id]);
+
+      if (newRider) {
+        const originalSegment = JSON.stringify({
+          riderId: deliveredOrder.rider_id,
+          riderName: rider?.name || '',
+          fromStatus: 'delivering',
+          fromTime: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
+          toTime: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+        });
+        const newRiderSegment = JSON.stringify({
+          riderId: newRider.id,
+          riderName: newRider.name,
+          fromStatus: 'delivering',
+          fromTime: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+          toTime: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+        });
+
+        this.db.run(
+          `INSERT INTO order_reassign (order_id, original_rider_id, new_rider_id, accident_type, accident_description, accident_photos, original_rider_segment, new_rider_segment, original_rider_responsibility, new_rider_responsibility, platform_responsibility, reassigned_at, accepted_at, status)
+           VALUES (?, ?, ?, 'vehicle_breakdown', '车辆电瓶故障，无法继续行驶', '[]', ?, ?, 0, 80, 20, datetime('now'), datetime('now'), 'completed')`,
+          [deliveredOrder.id, deliveredOrder.rider_id, newRider.id, originalSegment, newRiderSegment],
+        );
+      }
     }
   }
 }

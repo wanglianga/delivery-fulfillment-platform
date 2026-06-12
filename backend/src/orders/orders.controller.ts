@@ -42,6 +42,13 @@ export class OrdersController {
     });
   }
 
+  @Get('reassigning')
+  findAllReassigning(
+    @Query('stationId') stationId?: string,
+  ) {
+    return this.ordersService.findAllReassigningOrders(stationId ? Number(stationId) : undefined);
+  }
+
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.ordersService.findOne(id);
@@ -185,5 +192,73 @@ export class OrdersController {
     @CurrentUser() user: any,
   ) {
     return this.ordersService.merchantReady(id, user.name);
+  }
+
+  @Post(':id/report-accident')
+  reportAccident(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { accidentType: string; description: string; photos?: string[] },
+    @CurrentUser() user: any,
+  ) {
+    return this.ordersService.reportAccident(id, user.id, body);
+  }
+
+  @Get(':id/nearby-riders')
+  findNearbyRiders(
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.ordersService.findNearbyRiders(id);
+  }
+
+  @Post(':id/reassign')
+  reassignOrder(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { newRiderId: number; responsibilitySplit?: { originalRider: number; newRider: number; platform: number } },
+    @CurrentUser() user: any,
+  ) {
+    return this.ordersService.reassignOrder(id, body.newRiderId, user.name, body.responsibilitySplit);
+  }
+
+  @Get(':id/reassign-records')
+  findReassignRecords(
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.ordersService.findReassignRecordsByOrder(id);
+  }
+
+  @Post(':id/request-address-change')
+  requestAddressChange(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { newAddress: string },
+    @CurrentUser() user: any,
+  ) {
+    return this.ordersService.requestAddressChange(id, {
+      newAddress: body.newAddress,
+      requestedBy: user.id,
+    });
+  }
+
+  @Post(':id/confirm-address-change')
+  confirmAddressChange(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
+    return this.ordersService.confirmAddressChange(id, user.id);
+  }
+
+  @Post(':id/reject-address-change')
+  rejectAddressChange(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { reason: string },
+    @CurrentUser() user: any,
+  ) {
+    return this.ordersService.rejectAddressChange(id, user.id, body.reason);
+  }
+
+  @Get(':id/address-change-records')
+  findAddressChangeRecords(
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.ordersService.findAddressChangeByOrder(id);
   }
 }

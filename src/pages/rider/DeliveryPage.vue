@@ -239,14 +239,164 @@
       </div>
     </div>
 
+    <div v-if="order?.reassignRecords?.length" class="card border-l-4 border-orange-500">
+      <h3 class="font-semibold text-text mb-3 flex items-center gap-2">
+        <Repeat class="w-4 h-4 text-orange-600" /> 转派记录
+      </h3>
+      <div v-for="rec in order.reassignRecords" :key="rec.id" class="mb-3 last:mb-0">
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <span class="text-text-light">事故类型：</span>
+            <span class="font-medium">{{ accidentTypeLabel(rec.accidentType) }}</span>
+          </div>
+          <div>
+            <span class="text-text-light">事故说明：</span>
+            <span class="font-medium">{{ rec.accidentDescription }}</span>
+          </div>
+          <div>
+            <span class="text-text-light">原骑手：</span>
+            <span class="font-medium text-orange-600">{{ rec.originalRiderName }}</span>
+          </div>
+          <div>
+            <span class="text-text-light">接力骑手：</span>
+            <span class="font-medium text-accent">{{ rec.newRiderName || '待指派' }}</span>
+          </div>
+        </div>
+        <div v-if="rec.originalRiderSegment" class="mt-2 p-2 rounded bg-gray-50 text-xs">
+          <div class="font-medium text-text mb-1">轨迹段</div>
+          <div class="flex gap-4">
+            <div>
+              <span class="text-text-light">原骑手续：</span>
+              {{ rec.originalRiderName }} ({{ formatTime(rec.originalRiderSegment.fromTime) }} → {{ rec.originalRiderSegment.toTime ? formatTime(rec.originalRiderSegment.toTime) : '进行中' }})
+            </div>
+            <div v-if="rec.newRiderSegment?.riderId">
+              <span class="text-text-light">新骑手续：</span>
+              {{ rec.newRiderName }} ({{ formatTime(rec.newRiderSegment.fromTime) }} → {{ rec.newRiderSegment.toTime ? formatTime(rec.newRiderSegment.toTime) : '进行中' }})
+            </div>
+          </div>
+        </div>
+        <div class="mt-2 flex gap-4 text-xs">
+          <span class="px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">原骑手 {{ rec.originalRiderResponsibility }}%</span>
+          <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">新骑手 {{ rec.newRiderResponsibility }}%</span>
+          <span class="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">平台 {{ rec.platformResponsibility }}%</span>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="order?.status === 'pending_negotiation'" class="card border-l-4 border-amber-500">
+      <h3 class="font-semibold text-text mb-3 flex items-center gap-2">
+        <MapPin class="w-4 h-4 text-amber-600" /> 地址修改协商
+      </h3>
+      <div class="space-y-3 text-sm">
+        <div class="flex items-center gap-2">
+          <span class="text-text-light">原地址：</span>
+          <span class="line-through text-text-muted">{{ order.originalCustomerAddress }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-text-light">新地址：</span>
+          <span class="font-medium">{{ order.customerAddress }}</span>
+        </div>
+        <div class="grid grid-cols-3 gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
+          <div class="text-center">
+            <div class="text-lg font-semibold text-amber-700">{{ order.addressChangeExtraDistance?.toFixed(1) || '0' }}km</div>
+            <div class="text-xs text-amber-600">新增距离</div>
+          </div>
+          <div class="text-center">
+            <div class="text-lg font-semibold" :class="(order.addressChangeExtraFee || 0) > 0 ? 'text-red-600' : 'text-green-600'">
+              ¥{{ order.addressChangeExtraFee?.toFixed(1) || '0' }}
+            </div>
+            <div class="text-xs text-amber-600">补差价</div>
+          </div>
+          <div class="text-center">
+            <div class="text-lg font-semibold" :class="order.addressChangeOutOfArea ? 'text-red-600' : 'text-green-600'">
+              {{ order.addressChangeOutOfArea ? '超出' : '未超出' }}
+            </div>
+            <div class="text-xs text-amber-600">服务区</div>
+          </div>
+        </div>
+        <div v-if="order.addressChangeOutOfArea" class="flex items-start gap-2 text-red-600 text-sm">
+          <AlertTriangle class="w-4 h-4 shrink-0 mt-0.5" />
+          <span>新地址超出服务区范围，请确认是否可以配送</span>
+        </div>
+        <div class="flex justify-end gap-3 pt-2">
+          <button
+            class="btn-secondary"
+            :disabled="acting"
+            @click="rejectAddressChange"
+          >
+            拒绝修改
+          </button>
+          <button
+            class="btn-primary"
+            :disabled="acting"
+            @click="confirmAddressChange"
+          >
+            确认修改
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="order?.addressChangeRecords?.filter((r: any) => r.status === 'rider_confirmed').length" class="card">
+      <h3 class="font-semibold text-text mb-3 flex items-center gap-2">
+        <MapPin class="w-4 h-4 text-green-600" /> 已确认的地址变更
+      </h3>
+      <div v-for="rec in order.addressChangeRecords.filter((r: any) => r.status === 'rider_confirmed')" :key="rec.id" class="text-sm">
+        <div class="flex items-center gap-2 mb-1">
+          <span class="text-text-light">原地址：</span>
+          <span class="line-through text-text-muted">{{ rec.originalAddress }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-text-light">新地址：</span>
+          <span class="font-medium">{{ rec.newAddress }}</span>
+          <span v-if="rec.extraFee > 0" class="text-xs text-red-600">+¥{{ rec.extraFee.toFixed(1) }}</span>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="flex items-center justify-between">
         <h3 class="font-semibold text-text">异常处理</h3>
-        <button class="btn-secondary" @click="showExceptionModal = true">
-          <AlertTriangle class="w-4 h-4 mr-1 inline" /> 上报异常
-        </button>
+        <div class="flex gap-2">
+          <button class="btn-secondary" @click="showAccidentModal = true">
+            <Bike class="w-4 h-4 mr-1 inline" /> 上报事故
+          </button>
+          <button class="btn-secondary" @click="showExceptionModal = true">
+            <AlertTriangle class="w-4 h-4 mr-1 inline" /> 上报异常
+          </button>
+        </div>
       </div>
     </div>
+
+    <Modal :show="showAccidentModal" title="上报事故" @close="showAccidentModal = false">
+      <form @submit.prevent="submitAccident" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-text mb-1">事故类型</label>
+          <select v-model="accidentForm.accidentType" class="select-field" required>
+            <option value="crash">摔车</option>
+            <option value="vehicle_breakdown">车辆故障</option>
+            <option value="other">其他</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-text mb-1">事故说明</label>
+          <textarea v-model="accidentForm.description" class="input-field" rows="4" placeholder="请详细描述事故情况" required></textarea>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-text mb-1">现场照片</label>
+          <input type="file" accept="image/*" multiple class="input-field" @change="handleAccidentPhotos" />
+        </div>
+        <div class="p-3 rounded-lg bg-orange-50 border border-orange-200 text-sm text-orange-800">
+          上报事故后，订单将进入转派状态，调度将安排其他骑手接力配送。您的轨迹段和责任将被保留。
+        </div>
+        <div class="flex justify-end gap-3 pt-2">
+          <button type="button" class="btn-secondary" @click="showAccidentModal = false">取消</button>
+          <button type="submit" class="btn-primary" :disabled="submitting">
+            {{ submitting ? '提交中...' : '确认上报' }}
+          </button>
+        </div>
+      </form>
+    </Modal>
 
     <Modal :show="showExceptionModal" title="异常上报" @close="showExceptionModal = false">
       <form @submit.prevent="submitException" class="space-y-4">
@@ -281,7 +431,7 @@ import api from '@/api'
 import StatusBadge from '@/components/StatusBadge.vue'
 import StepProgress from '@/components/StepProgress.vue'
 import Modal from '@/components/Modal.vue'
-import { MapPin, Package, Truck, Camera, CheckCircle, AlertTriangle, Clock, UtensilsCrossed } from 'lucide-vue-next'
+import { MapPin, Package, Truck, Camera, CheckCircle, AlertTriangle, Clock, UtensilsCrossed, Repeat, Bike } from 'lucide-vue-next'
 
 const route = useRoute()
 const orderId = computed(() => Number(route.params.id))
@@ -293,6 +443,7 @@ const acting = ref(false)
 const deliveryPhotoInput = ref<HTMLInputElement | null>(null)
 const pickupPhotoInput = ref<HTMLInputElement | null>(null)
 const showExceptionModal = ref(false)
+const showAccidentModal = ref(false)
 const submitting = ref(false)
 const waitSeconds = ref(0)
 let waitTimer: ReturnType<typeof setInterval> | null = null
@@ -307,6 +458,8 @@ const stepIndexMap: Record<string, number> = {
   delivering: 3,
   delivered: 4,
   signed: 5,
+  reassigning: 3,
+  pending_negotiation: 3,
 }
 
 const currentStepIndex = computed(() => stepIndexMap[order.value?.status || ''] ?? 0)
@@ -487,6 +640,37 @@ const exceptionForm = reactive({
   description: '',
 })
 
+const accidentForm = reactive({
+  accidentType: 'crash',
+  description: '',
+  photos: [] as string[],
+})
+
+function handleAccidentPhotos(event: Event) {
+  const input = event.target as HTMLInputElement
+  accidentForm.photos = Array.from(input.files || []).map(f => f.name)
+}
+
+async function submitAccident() {
+  submitting.value = true
+  try {
+    await api.post(`/orders/${orderId.value}/report-accident`, {
+      accidentType: accidentForm.accidentType,
+      description: accidentForm.description,
+      photos: accidentForm.photos,
+    })
+    showAccidentModal.value = false
+    accidentForm.accidentType = 'crash'
+    accidentForm.description = ''
+    accidentForm.photos = []
+    await fetchOrder()
+  } catch (e) {
+    console.error('上报事故失败', e)
+  } finally {
+    submitting.value = false
+  }
+}
+
 async function submitException() {
   submitting.value = true
   try {
@@ -503,6 +687,41 @@ async function submitException() {
   } finally {
     submitting.value = false
   }
+}
+
+async function confirmAddressChange() {
+  acting.value = true
+  try {
+    await api.post(`/orders/${orderId.value}/confirm-address-change`)
+    await fetchOrder()
+  } catch (e) {
+    console.error('确认地址修改失败', e)
+  } finally {
+    acting.value = false
+  }
+}
+
+async function rejectAddressChange() {
+  acting.value = true
+  try {
+    await api.post(`/orders/${orderId.value}/reject-address-change`, {
+      reason: '骑手拒绝地址修改',
+    })
+    await fetchOrder()
+  } catch (e) {
+    console.error('拒绝地址修改失败', e)
+  } finally {
+    acting.value = false
+  }
+}
+
+function accidentTypeLabel(type: string) {
+  const map: Record<string, string> = {
+    crash: '摔车',
+    vehicle_breakdown: '车辆故障',
+    other: '其他',
+  }
+  return map[type] || type
 }
 
 onMounted(fetchOrder)

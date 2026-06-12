@@ -31,6 +31,9 @@ const orderStatusMap: Record<string, { label: string; color: string }> = {
   completed: { label: '已完成', color: 'bg-green-100 text-green-700' },
   cancelled: { label: '已取消', color: 'bg-gray-100 text-gray-600' },
   timeout: { label: '超时', color: 'bg-red-100 text-red-700' },
+  exception: { label: '异常', color: 'bg-red-100 text-red-800' },
+  reassigning: { label: '转派中', color: 'bg-orange-100 text-orange-800' },
+  pending_negotiation: { label: '待协商', color: 'bg-amber-100 text-amber-800' },
 }
 
 const shiftStatusMap: Record<string, { label: string; color: string }> = {

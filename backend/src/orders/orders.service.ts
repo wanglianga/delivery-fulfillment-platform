@@ -84,6 +84,23 @@ export class OrdersService {
     );
     order.slowPrepareRecord = slowRecord ? this.mapSlowPrepareRow(slowRecord) : null;
 
+    const reassignRecords = this.db.all(
+      `SELECT r.*, u1.name as original_rider_name, u2.name as new_rider_name
+       FROM order_reassign r
+       LEFT JOIN user u1 ON r.original_rider_id = u1.id
+       LEFT JOIN user u2 ON r.new_rider_id = u2.id
+       WHERE r.order_id = ?
+       ORDER BY r.created_at DESC`,
+      [id],
+    );
+    order.reassignRecords = reassignRecords.map(this.mapReassignRow);
+
+    const addressChangeRecords = this.db.all(
+      'SELECT * FROM address_change_request WHERE order_id = ? ORDER BY created_at DESC',
+      [id],
+    );
+    order.addressChangeRecords = addressChangeRecords.map(this.mapAddressChangeRow);
+
     return order;
   }
 
@@ -496,6 +513,438 @@ export class OrdersService {
     return updated;
   }
 
+  reportAccident(
+    id: number,
+    riderId: number,
+    data: { accidentType: string; description: string; photos?: string[] },
+  ) {
+    const order = this.getOrderOrThrow(id);
+    if (!order.riderId || order.riderId !== riderId) {
+      throw new BadRequestException('只能上报自己配送中的订单事故');
+    }
+    if (!['accepted', 'arrived_store', 'picked_up', 'delivering'].includes(order.status)) {
+      throw new BadRequestException('当前订单状态无法上报事故');
+    }
+
+    const existing = this.db.get(
+      `SELECT id FROM order_reassign WHERE order_id = ? AND status IN ('pending', 'accepted')`,
+      [id],
+    );
+    if (existing) {
+      throw new BadRequestException('该订单已有待处理的转派记录');
+    }
+
+    const originalRiderSegment = JSON.stringify({
+      riderId: order.riderId,
+      riderName: order.riderName,
+      fromStatus: order.status,
+      fromTime: new Date().toISOString(),
+      toTime: null,
+    });
+
+    this.db.run(
+      `UPDATE orders SET status = 'reassigning', updated_at = datetime('now') WHERE id = ?`,
+      [id],
+    );
+
+    const result = this.db.run(
+      `INSERT INTO order_reassign (order_id, original_rider_id, accident_type, accident_description, accident_photos, original_rider_segment, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+      [
+        id,
+        riderId,
+        data.accidentType,
+        data.description,
+        JSON.stringify(data.photos || []),
+        originalRiderSegment,
+      ],
+    );
+
+    this.addTimeline(
+      id,
+      'accident_reported',
+      order.riderName,
+      `骑手上报事故(${this.accidentTypeLabel(data.accidentType)})：${data.description}`,
+    );
+
+    const reassignId = Number(result.lastInsertRowid);
+    const reassignRecord = this.findReassignRecord(reassignId);
+    const updated = this.findOne(id);
+    this.emitOrderUpdate(updated);
+    return { order: updated, reassign: reassignRecord };
+  }
+
+  findNearbyRiders(orderId: number) {
+    const order = this.getOrderOrThrow(orderId);
+    const stationId = order.stationId;
+
+    const activeShiftRiders = this.db.all(
+      `SELECT DISTINCT u.id, u.name, u.station_id
+       FROM user u
+       JOIN shift s ON u.id = s.rider_id
+       WHERE u.role = 'rider' AND u.station_id = ? AND s.status = 'active'
+         AND u.id NOT IN (SELECT rider_id FROM orders WHERE status IN ('accepted', 'arrived_store', 'picked_up', 'delivering') AND rider_id IS NOT NULL)
+       ORDER BY u.name`,
+      [stationId],
+    );
+
+    const busyRiders = this.db.all(
+      `SELECT DISTINCT u.id, u.name, u.station_id, COUNT(o.id) as active_order_count
+       FROM user u
+       JOIN orders o ON u.id = o.rider_id
+       WHERE u.role = 'rider' AND u.station_id = ? AND o.status IN ('accepted', 'arrived_store', 'picked_up', 'delivering')
+       GROUP BY u.id
+       ORDER BY active_order_count ASC`,
+      [stationId],
+    );
+
+    return {
+      available: activeShiftRiders.map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        stationId: r.station_id,
+        busy: false,
+      })),
+      busy: busyRiders.map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        stationId: r.station_id,
+        busy: true,
+        activeOrderCount: r.active_order_count,
+      })),
+    };
+  }
+
+  reassignOrder(
+    id: number,
+    newRiderId: number,
+    operatorName: string,
+    responsibilitySplit?: {
+      originalRider: number;
+      newRider: number;
+      platform: number;
+    },
+  ) {
+    const order = this.getOrderOrThrow(id);
+    if (order.status !== 'reassigning') {
+      throw new BadRequestException('只有转派中的订单可以执行转派');
+    }
+
+    const reassignRecord = this.db.get(
+      `SELECT * FROM order_reassign WHERE order_id = ? AND status = 'pending'`,
+      [id],
+    );
+    if (!reassignRecord) {
+      throw new BadRequestException('未找到待处理的转派记录');
+    }
+
+    const newRider = this.db.get('SELECT * FROM user WHERE id = ? AND role = ?', [newRiderId, 'rider']);
+    if (!newRider) {
+      throw new BadRequestException('目标骑手不存在');
+    }
+
+    const originalSegment = JSON.parse(reassignRecord.original_rider_segment || '{}');
+    originalSegment.toTime = new Date().toISOString();
+    originalSegment.toStatus = 'reassigning';
+
+    const newRiderSegment = JSON.stringify({
+      riderId: newRiderId,
+      riderName: newRider.name,
+      fromStatus: order.status,
+      fromTime: new Date().toISOString(),
+      toTime: null,
+    });
+
+    const split = responsibilitySplit || { originalRider: 0, newRider: 100, platform: 0 };
+
+    const now = new Date().toISOString();
+    this.db.run(
+      `UPDATE order_reassign SET new_rider_id = ?, original_rider_segment = ?, new_rider_segment = ?,
+       original_rider_responsibility = ?, new_rider_responsibility = ?, platform_responsibility = ?,
+       reassigned_at = ?, status = 'accepted', updated_at = datetime('now') WHERE id = ?`,
+      [
+        newRiderId,
+        JSON.stringify(originalSegment),
+        newRiderSegment,
+        split.originalRider,
+        split.newRider,
+        split.platform,
+        now,
+        reassignRecord.id,
+      ],
+    );
+
+    const previousStatus = this.getPreviousDeliveryStatus(order);
+    this.db.run(
+      `UPDATE orders SET rider_id = ?, status = ?, updated_at = datetime('now') WHERE id = ?`,
+      [newRiderId, previousStatus, id],
+    );
+
+    this.addTimeline(
+      id,
+      'order_reassigned',
+      operatorName,
+      `订单已转派给骑手${newRider.name}，原骑手${order.riderName}因事故退出，责任拆分：原骑手${split.originalRider}%/新骑手${split.newRider}%/平台${split.platform}%`,
+    );
+
+    const updated = this.findOne(id);
+    this.emitOrderUpdate(updated);
+    return { order: updated, reassign: this.findReassignRecord(reassignRecord.id) };
+  }
+
+  private getPreviousDeliveryStatus(order: any): string {
+    if (order.deliveringAt) return 'delivering';
+    if (order.pickedUpAt) return 'picked_up';
+    if (order.arrivedStoreAt) return 'arrived_store';
+    return 'accepted';
+  }
+
+  findReassignRecord(id: number) {
+    const row = this.db.get(
+      `SELECT r.*, u1.name as original_rider_name, u2.name as new_rider_name
+       FROM order_reassign r
+       LEFT JOIN user u1 ON r.original_rider_id = u1.id
+       LEFT JOIN user u2 ON r.new_rider_id = u2.id
+       WHERE r.id = ?`,
+      [id],
+    );
+    return row ? this.mapReassignRow(row) : null;
+  }
+
+  findReassignRecordsByOrder(orderId: number) {
+    const rows = this.db.all(
+      `SELECT r.*, u1.name as original_rider_name, u2.name as new_rider_name
+       FROM order_reassign r
+       LEFT JOIN user u1 ON r.original_rider_id = u1.id
+       LEFT JOIN user u2 ON r.new_rider_id = u2.id
+       WHERE r.order_id = ?
+       ORDER BY r.created_at DESC`,
+      [orderId],
+    );
+    return rows.map(this.mapReassignRow);
+  }
+
+  findAllReassigningOrders(stationId?: number) {
+    let sql = `SELECT o.*, m.name as merchant_name, u.name as rider_name
+               FROM orders o
+               JOIN merchant m ON o.merchant_id = m.id
+               LEFT JOIN user u ON o.rider_id = u.id
+               WHERE o.status = 'reassigning'`;
+    const params: any[] = [];
+    if (stationId) {
+      sql += ` AND o.station_id = ?`;
+      params.push(stationId);
+    }
+    sql += ` ORDER BY o.updated_at DESC`;
+    const rows = this.db.all(sql, params);
+    return rows.map(this.mapRow);
+  }
+
+  requestAddressChange(
+    id: number,
+    data: { newAddress: string; requestedBy: number },
+  ) {
+    const order = this.getOrderOrThrow(id);
+    if (!['accepted', 'arrived_store', 'picked_up', 'delivering'].includes(order.status)) {
+      throw new BadRequestException('当前订单状态无法修改地址');
+    }
+
+    const existing = this.db.get(
+      `SELECT id FROM address_change_request WHERE order_id = ? AND status = 'pending'`,
+      [id],
+    );
+    if (existing) {
+      throw new BadRequestException('该订单已有待处理的地址修改请求');
+    }
+
+    const extraDistance = this.calculateExtraDistance(order.customerAddress, data.newAddress);
+    const extraFee = this.calculateExtraFee(extraDistance);
+    const outOfArea = this.checkOutOfArea(order.stationId, data.newAddress);
+
+    this.db.run(
+      `UPDATE orders SET
+        original_customer_address = ?,
+        customer_address = ?,
+        address_change_extra_distance = ?,
+        address_change_extra_fee = ?,
+        address_change_out_of_area = ?,
+        status = 'pending_negotiation',
+        updated_at = datetime('now')
+       WHERE id = ?`,
+      [
+        order.customerAddress,
+        data.newAddress,
+        extraDistance,
+        extraFee,
+        outOfArea ? 1 : 0,
+        id,
+      ],
+    );
+
+    const result = this.db.run(
+      `INSERT INTO address_change_request (order_id, requested_by, original_address, new_address, extra_distance, extra_fee, out_of_area, status, rider_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+      [
+        id,
+        data.requestedBy,
+        order.customerAddress,
+        data.newAddress,
+        extraDistance,
+        extraFee,
+        outOfArea ? 1 : 0,
+        order.riderId,
+      ],
+    );
+
+    const detailParts = [
+      `顾客修改地址：${order.customerAddress} → ${data.newAddress}`,
+      `新增距离：${extraDistance.toFixed(1)}公里`,
+      outOfArea ? '⚠️ 新地址超出服务区' : '',
+      extraFee > 0 ? `需补差价：¥${extraFee.toFixed(1)}` : '无需补差价',
+    ].filter(Boolean).join('，');
+
+    this.addTimeline(id, 'address_change_requested', '顾客', detailParts);
+
+    const updated = this.findOne(id);
+    this.emitOrderUpdate(updated);
+    return {
+      order: updated,
+      addressChange: this.findAddressChangeRequest(Number(result.lastInsertRowid)),
+    };
+  }
+
+  confirmAddressChange(id: number, riderId: number) {
+    const order = this.getOrderOrThrow(id);
+    if (order.status !== 'pending_negotiation') {
+      throw new BadRequestException('只有待协商状态的订单可以确认地址修改');
+    }
+    if (order.riderId !== riderId) {
+      throw new BadRequestException('只有当前配送骑手可以确认地址修改');
+    }
+
+    const request = this.db.get(
+      `SELECT * FROM address_change_request WHERE order_id = ? AND status = 'pending'`,
+      [id],
+    );
+    if (!request) {
+      throw new BadRequestException('未找到待处理的地址修改请求');
+    }
+
+    this.db.run(
+      `UPDATE address_change_request SET status = 'rider_confirmed', updated_at = datetime('now') WHERE id = ?`,
+      [request.id],
+    );
+
+    const previousStatus = this.getPreviousDeliveryStatus(order);
+    this.db.run(
+      `UPDATE orders SET status = ?, delivery_fee = delivery_fee + ?, updated_at = datetime('now') WHERE id = ?`,
+      [previousStatus, order.addressChangeExtraFee || 0, id],
+    );
+
+    this.addTimeline(
+      id,
+      'address_change_confirmed',
+      order.riderName,
+      `骑手确认地址修改，新地址：${order.customerAddress}，补差价：¥${(order.addressChangeExtraFee || 0).toFixed(1)}`,
+    );
+
+    const updated = this.findOne(id);
+    this.emitOrderUpdate(updated);
+    return updated;
+  }
+
+  rejectAddressChange(id: number, rejectedBy: number, reason: string) {
+    const order = this.getOrderOrThrow(id);
+    if (order.status !== 'pending_negotiation') {
+      throw new BadRequestException('只有待协商状态的订单可以拒绝地址修改');
+    }
+
+    const request = this.db.get(
+      `SELECT * FROM address_change_request WHERE order_id = ? AND status = 'pending'`,
+      [id],
+    );
+    if (!request) {
+      throw new BadRequestException('未找到待处理的地址修改请求');
+    }
+
+    const isRider = order.riderId === rejectedBy;
+    const newStatus = isRider ? 'rider_rejected' : 'system_rejected';
+
+    this.db.run(
+      `UPDATE address_change_request SET status = ?, updated_at = datetime('now') WHERE id = ?`,
+      [newStatus, request.id],
+    );
+
+    this.db.run(
+      `UPDATE orders SET
+        customer_address = ?,
+        original_customer_address = NULL,
+        address_change_extra_distance = 0,
+        address_change_extra_fee = 0,
+        address_change_out_of_area = 0,
+        status = ?,
+        updated_at = datetime('now')
+       WHERE id = ?`,
+      [request.original_address, this.getPreviousDeliveryStatus(order), id],
+    );
+
+    this.addTimeline(
+      id,
+      'address_change_rejected',
+      isRider ? order.riderName : '系统',
+      `地址修改被拒绝（${reason}），恢复原地址：${request.original_address}`,
+    );
+
+    const updated = this.findOne(id);
+    this.emitOrderUpdate(updated);
+    return updated;
+  }
+
+  findAddressChangeRequest(id: number) {
+    const row = this.db.get(
+      `SELECT * FROM address_change_request WHERE id = ?`,
+      [id],
+    );
+    return row ? this.mapAddressChangeRow(row) : null;
+  }
+
+  findAddressChangeByOrder(orderId: number) {
+    const rows = this.db.all(
+      `SELECT * FROM address_change_request WHERE order_id = ? ORDER BY created_at DESC`,
+      [orderId],
+    );
+    return rows.map(this.mapAddressChangeRow);
+  }
+
+  private calculateExtraDistance(originalAddress: string, newAddress: string): number {
+    if (originalAddress === newAddress) return 0;
+    const hash = (originalAddress + newAddress).length;
+    return Math.round((hash % 50 + 5) / 10 * 10) / 10;
+  }
+
+  private calculateExtraFee(extraDistance: number): number {
+    if (extraDistance <= 0) return 0;
+    if (extraDistance <= 1) return 0;
+    if (extraDistance <= 3) return Math.round(extraDistance * 2 * 10) / 10;
+    return Math.round((3 * 2 + (extraDistance - 3) * 3) * 10) / 10;
+  }
+
+  private checkOutOfArea(stationId: number, newAddress: string): boolean {
+    const station = this.db.get('SELECT service_area FROM station WHERE id = ?', [stationId]);
+    if (!station) return false;
+    const areaKeywords = station.service_area.split(/[,，、]/);
+    return !areaKeywords.some((kw: string) => newAddress.includes(kw.trim()));
+  }
+
+  private accidentTypeLabel(type: string): string {
+    const map: Record<string, string> = {
+      crash: '摔车',
+      vehicle_breakdown: '车辆故障',
+      other: '其他',
+    };
+    return map[type] || type;
+  }
+
   private getOrderOrThrow(id: number) {
     const row = this.db.get(
       `SELECT o.*, m.name as merchant_name, u.name as rider_name
@@ -585,6 +1034,51 @@ export class OrdersService {
       pickupPhoto: row.pickup_photo,
       slowPrepareFlag: row.slow_prepare_flag || 0,
       slowPrepareWaitSeconds: row.slow_prepare_wait_seconds || 0,
+      originalCustomerAddress: row.original_customer_address,
+      addressChangeExtraDistance: row.address_change_extra_distance || 0,
+      addressChangeExtraFee: row.address_change_extra_fee || 0,
+      addressChangeOutOfArea: row.address_change_out_of_area || 0,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private mapReassignRow(row: any) {
+    return {
+      id: row.id,
+      orderId: row.order_id,
+      originalRiderId: row.original_rider_id,
+      originalRiderName: row.original_rider_name,
+      newRiderId: row.new_rider_id,
+      newRiderName: row.new_rider_name,
+      accidentType: row.accident_type,
+      accidentDescription: row.accident_description,
+      accidentPhotos: JSON.parse(row.accident_photos || '[]'),
+      originalRiderSegment: JSON.parse(row.original_rider_segment || '{}'),
+      newRiderSegment: JSON.parse(row.new_rider_segment || '{}'),
+      originalRiderResponsibility: row.original_rider_responsibility,
+      newRiderResponsibility: row.new_rider_responsibility,
+      platformResponsibility: row.platform_responsibility,
+      reassignedAt: row.reassigned_at,
+      acceptedAt: row.accepted_at,
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private mapAddressChangeRow(row: any) {
+    return {
+      id: row.id,
+      orderId: row.order_id,
+      requestedBy: row.requested_by,
+      originalAddress: row.original_address,
+      newAddress: row.new_address,
+      extraDistance: row.extra_distance,
+      extraFee: row.extra_fee,
+      outOfArea: row.out_of_area,
+      status: row.status,
+      riderId: row.rider_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
